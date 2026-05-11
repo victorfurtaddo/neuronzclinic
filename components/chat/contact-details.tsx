@@ -14,16 +14,47 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
+import { ChatRecord } from "@/lib/supabase-rest"
 
 interface ContactDetailsProps {
+  chat?: ChatRecord
   onClose?: () => void
 }
 
-export function ContactDetails({ onClose }: ContactDetailsProps) {
+function getDisplayName(chat?: ChatRecord) {
+  return chat?.nome_contato || chat?.pushname || chat?.chat_id?.replace("@s.whatsapp.net", "") || "Contato sem nome"
+}
+
+function getPhone(chat?: ChatRecord) {
+  return chat?.phone_contact || chat?.chat_id?.replace("@s.whatsapp.net", "") || ""
+}
+
+function parseTags(chat?: ChatRecord): string[] {
+  if (!chat) return []
+  const candidates = [chat.json_tags_parsed, chat.json_tags, chat.tag_chat_array]
+
+  for (const candidate of candidates) {
+    if (!candidate) continue
+    if (Array.isArray(candidate)) return candidate.map(String).filter(Boolean)
+    if (typeof candidate === "string") {
+      try {
+        const parsed = JSON.parse(candidate)
+        if (Array.isArray(parsed)) return parsed.map(String).filter(Boolean)
+      } catch {
+        return candidate.split(",").map((tag) => tag.trim()).filter(Boolean)
+      }
+    }
+  }
+
+  return chat.Status_chat ? [chat.Status_chat] : []
+}
+
+export function ContactDetails({ chat, onClose }: ContactDetailsProps) {
   const [activeTab, setActiveTab] = useState<"contato" | "detalhes">("detalhes")
   const [bottomTab, setBottomTab] = useState<"consultas" | "avisos">("consultas")
   const [isRead, setIsRead] = useState(false)
   const [infoExpanded, setInfoExpanded] = useState(true)
+  const tags = parseTags(chat)
   
   const tabs = [
     { id: "contato", label: "Contato" },
@@ -73,8 +104,11 @@ export function ContactDetails({ onClose }: ContactDetailsProps) {
             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-muted">
               <div className="h-5 w-5 rounded bg-gradient-to-br from-gray-300 to-gray-400" />
             </div>
-            <button className="flex items-center gap-1 rounded bg-green-500 px-2.5 py-1 text-xs font-medium text-white">
-              Aberta
+            <button
+              className="flex items-center gap-1 rounded px-2.5 py-1 text-xs font-medium text-white"
+              style={{ backgroundColor: chat?.hex_status || (chat?.finalizada ? "#6b7280" : "#22c55e") }}
+            >
+              {chat?.finalizada ? "Finalizada" : chat?.Status_chat || "Aberta"}
               <ChevronDown className="h-3 w-3" />
             </button>
           </div>
@@ -96,7 +130,7 @@ export function ContactDetails({ onClose }: ContactDetailsProps) {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Phone className="h-4 w-4" />
-              <span>15981293249</span>
+              <span>{getPhone(chat)}</span>
             </div>
             <Switch checked={isRead} onCheckedChange={setIsRead} />
           </div>
@@ -106,7 +140,8 @@ export function ContactDetails({ onClose }: ContactDetailsProps) {
         <div className="mb-4">
           <div className="flex items-center gap-2">
             <Input
-              defaultValue="Victor"
+              value={getDisplayName(chat)}
+              readOnly
               className="flex-1 border-0 border-b border-border bg-transparent px-0 text-base font-medium focus-visible:ring-0 rounded-none"
             />
             <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground">
@@ -122,7 +157,7 @@ export function ContactDetails({ onClose }: ContactDetailsProps) {
               Status contato
             </label>
             <button className="flex w-full items-center justify-between rounded bg-red-500 px-3 py-1.5 text-sm font-medium text-white">
-              ADM
+              {chat?.Status_chat || "Nenhum"}
               <ChevronDown className="h-4 w-4" />
             </button>
           </div>
@@ -179,12 +214,18 @@ export function ContactDetails({ onClose }: ContactDetailsProps) {
                 Tags do contato
               </label>
               <div className="flex flex-wrap items-center gap-2 rounded border border-border bg-card px-3 py-2">
-                <span className="flex items-center gap-1 rounded bg-teal-600 px-2 py-0.5 text-xs font-medium text-white">
-                  Site
-                  <button className="hover:text-teal-200">
-                    <X className="h-3 w-3" />
-                  </button>
-                </span>
+                {tags.length > 0 ? (
+                  tags.map((tag) => (
+                    <span
+                      key={tag}
+                      className="flex items-center gap-1 rounded bg-teal-600 px-2 py-0.5 text-xs font-medium text-white"
+                    >
+                      {tag}
+                    </span>
+                  ))
+                ) : (
+                  <span className="text-sm text-muted-foreground">Nenhuma tag</span>
+                )}
                 <ChevronDown className="ml-auto h-4 w-4 text-muted-foreground" />
               </div>
             </div>
