@@ -57,6 +57,18 @@ function getTime(chat: ChatRecord) {
   return chat.last_time_formatado ?? ""
 }
 
+function getStatusColor(chat: ChatRecord) {
+  if (chat.hex_status && /^#[0-9a-f]{6}$/i.test(chat.hex_status)) {
+    return chat.hex_status
+  }
+
+  return chat.finalizada ? "#6b7280" : "#22c55e"
+}
+
+function getStatusLabel(chat: ChatRecord) {
+  return chat.finalizada ? "Finalizada" : chat.Status_chat || "Aberta"
+}
+
 export function ContactList({
   chats,
   search,
@@ -175,12 +187,20 @@ export function ContactList({
                   selectedId === chat.id && "bg-secondary",
                 )}
               >
-                <Avatar className="h-11 w-11 shrink-0">
-                  <AvatarImage src={chat.url_foto_perfil ?? undefined} alt={name} />
-                  <AvatarFallback className="bg-muted text-sm font-medium text-muted-foreground">
-                    {getInitials(name)}
-                  </AvatarFallback>
-                </Avatar>
+                <div className="relative h-11 w-11 shrink-0">
+                  <Avatar className="h-11 w-11">
+                    <AvatarImage src={chat.url_foto_perfil ?? undefined} alt={name} />
+                    <AvatarFallback className="bg-muted text-sm font-medium text-muted-foreground">
+                      {getInitials(name)}
+                    </AvatarFallback>
+                  </Avatar>
+                  <span
+                    className="absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full border-2 border-card"
+                    style={{ backgroundColor: getStatusColor(chat) }}
+                    title={`Status: ${getStatusLabel(chat)}`}
+                    aria-label={`Status: ${getStatusLabel(chat)}`}
+                  />
+                </div>
 
                 <div className="min-w-0 flex-1 overflow-hidden">
                   <div className="flex items-center justify-between gap-2">
