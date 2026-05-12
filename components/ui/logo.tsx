@@ -25,9 +25,9 @@ export function Logo({ isCollapsed }: LogoProps) {
   let src = "/logo-full-dark.png";
 
   if (isCollapsed) {
-    src = resolvedTheme === "dark" ? "/logo-icon-dark.png" : "/logo-icon-light.png";
+    src = resolvedTheme === "dark" ? "/logos/logo-icon-dark.png" : "/logos/logo-icon-light.png";
   } else {
-    src = resolvedTheme === "dark" ? "/logo-full-dark.png" : "/logo-full-light.png";
+    src = resolvedTheme === "dark" ? "/logos/logo-full-dark.png" : "/logos/logo-full-light.png";
   }
 
   return (
@@ -41,4 +41,3 @@ export function Logo({ isCollapsed }: LogoProps) {
     </div>
   );
 }
-

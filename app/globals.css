@@ -42,6 +42,16 @@
   --warning-foreground: oklch(0.3 0.05 85);
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
+
+  --chat-background: #f0f2f5;
+  --chat-foreground: #111b21;
+  --chat-card: #ffffff;
+  --chat-popover: #ffffff;
+  --chat-primary: #00a884; /* Verde clássico do zap */
+  --chat-muted: #f0f2f5;
+  --chat-muted-foreground: #667781;
+  --chat-me: #d9fdd3;
+  --chat-other: #ffffff;
 }
 
 @layer base {
@@ -83,6 +93,18 @@
     --success-foreground: oklch(0.985 0 0);
     --warning: oklch(0.7 0.15 85);
     --warning-foreground: oklch(0.985 0 0);
+
+    --chat-background: oklch(0.145 0 0);
+    --chat-foreground: #e9edef;
+    --chat-card: #111b21;
+    --chat-popover: #111b21;
+    --chat-primary: #00a884;
+    --chat-muted: #202c33;
+    --chat-muted-foreground: #8696a0;
+
+    /* Cores das Bolhas */
+    --chat-me: #144d37;
+    --chat-other: #242626;
   }
 }
 
@@ -147,4 +169,3 @@
     @apply font-sans;
   }
 }
-
