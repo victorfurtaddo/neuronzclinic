@@ -30,7 +30,7 @@ export default function ChatsPage() {
   const isSearchingChats = isSearching && searchChatsTerm !== debouncedSearch.trim()
   const visibleChats = isSearching ? searchChats : chats
   const selectedChat = useMemo(
-    () => visibleChats.find((chat) => chat.id === selectedChatId) ?? visibleChats[0],
+    () => visibleChats.find((chat) => chat.id === selectedChatId),
     [selectedChatId, visibleChats],
   )
   const selectedChatRemoteId = selectedChat?.chat_id
@@ -122,7 +122,6 @@ export default function ChatsPage() {
       .then((data) => {
         if (!isMounted) return
         setChats(data)
-        setSelectedChatId((current) => current ?? data[0]?.id)
         setHasMoreChats(data.length === CHAT_PAGE_SIZE)
       })
       .catch((err) => {
@@ -160,7 +159,7 @@ export default function ChatsPage() {
         if (!isMounted) return
         setSearchChats(data)
         setSearchChatsTerm(term)
-        setSelectedChatId(data[0]?.id)
+        setSelectedChatId((current) => (data.some((chat) => chat.id === current) ? current : undefined))
         setHasMoreSearchChats(data.length === CHAT_PAGE_SIZE)
       })
       .catch((err) => {
@@ -224,6 +223,7 @@ export default function ChatsPage() {
         isLoadingOlder={isLoadingOlderMessages}
         hasMoreMessages={!!selectedChatRemoteId && hasMoreMessages}
         onLoadOlderMessages={loadOlderMessages}
+        onCloseChat={() => setSelectedChatId(undefined)}
         error={error}
       />
     </div>

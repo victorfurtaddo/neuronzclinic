@@ -4,6 +4,7 @@ import Image from "next/image"
 import type { UIEvent } from "react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { Download, Eye, FileText, Mic, MoreHorizontal, Paperclip, PenLine, Send } from "lucide-react"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
@@ -17,6 +18,7 @@ interface ChatWindowProps {
   isLoadingOlder?: boolean
   hasMoreMessages?: boolean
   onLoadOlderMessages?: () => Promise<number>
+  onCloseChat?: () => void
   error?: string
 }
 
@@ -85,6 +87,7 @@ export function ChatWindow({
   isLoadingOlder,
   hasMoreMessages,
   onLoadOlderMessages,
+  onCloseChat,
   error,
 }: ChatWindowProps) {
   const [isDetailsOpen, setIsDetailsOpen] = useState(false)
@@ -120,6 +123,21 @@ export function ChatWindow({
     bottomRef.current?.scrollIntoView({ block: "end" })
   }, [messages.length, chat?.id])
 
+  useEffect(() => {
+    if (!chat) return
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key !== "Escape") return
+
+      event.preventDefault()
+      setIsDetailsOpen(false)
+      onCloseChat?.()
+    }
+
+    window.addEventListener("keydown", handleKeyDown)
+    return () => window.removeEventListener("keydown", handleKeyDown)
+  }, [chat, onCloseChat])
+
   async function handleMessagesScroll(event: UIEvent<HTMLDivElement>) {
     if (!onLoadOlderMessages || !hasMoreMessages || isLoadingOlder || isLoading) return
     if (event.currentTarget.scrollTop > 120) return
@@ -134,8 +152,8 @@ export function ChatWindow({
 
   if (!chat) {
     return (
-      <div className="flex flex-1 items-center justify-center bg-background text-sm text-muted-foreground">
-        Nenhuma conversa disponivel.
+      <div className="flex flex-1 items-center justify-center bg-background px-6 text-center text-sm text-muted-foreground">
+        Selecione um contato para visualizar a conversa.
       </div>
     )
   }
@@ -147,12 +165,15 @@ export function ChatWindow({
           <div className="flex items-center gap-3">
             <button
               onClick={() => setIsDetailsOpen(true)}
-              className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-teal-500 to-teal-700 transition-opacity hover:opacity-90"
+              className="rounded-full transition-opacity hover:opacity-90"
               aria-label="Abrir detalhes do contato"
             >
-              <span className="text-sm font-semibold text-white">
-                {getDisplayName(chat).slice(0, 1).toUpperCase()}
-              </span>
+              <Avatar className="h-10 w-10">
+                <AvatarImage src={chat.url_foto_perfil ?? undefined} alt={getDisplayName(chat)} />
+                <AvatarFallback className="bg-gradient-to-br from-teal-500 to-teal-700 text-sm font-semibold text-white">
+                  {getDisplayName(chat).slice(0, 1).toUpperCase()}
+                </AvatarFallback>
+              </Avatar>
             </button>
             <div className="flex min-w-0 flex-col">
               <span className="truncate font-medium leading-none text-foreground">{getDisplayName(chat)}</span>
