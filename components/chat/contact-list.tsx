@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
+import { getChatTags, getReadableTextColor } from "@/lib/chat-tags"
 import { cn } from "@/lib/utils"
 import { ChatRecord } from "@/lib/supabase-rest"
 
@@ -54,39 +55,6 @@ function getTime(chat: ChatRecord) {
   }
 
   return chat.last_time_formatado ?? ""
-}
-
-function parseTags(chat: ChatRecord): string[] {
-  const candidates = [chat.json_tags_parsed, chat.json_tags, chat.tag_chat_array]
-
-  for (const candidate of candidates) {
-    if (!candidate) continue
-
-    if (Array.isArray(candidate)) {
-      return candidate
-        .map((tag) => {
-          if (typeof tag === "string") return tag
-          if (tag && typeof tag === "object" && "label" in tag) return String(tag.label)
-          if (tag && typeof tag === "object" && "name" in tag) return String(tag.name)
-          return ""
-        })
-        .filter(Boolean)
-    }
-
-    if (typeof candidate === "string") {
-      try {
-        const parsed = JSON.parse(candidate)
-        if (Array.isArray(parsed)) return parsed.map(String)
-      } catch {
-        return candidate
-          .split(",")
-          .map((tag) => tag.trim())
-          .filter(Boolean)
-      }
-    }
-  }
-
-  return chat.Status_chat ? [chat.Status_chat] : []
 }
 
 export function ContactList({
@@ -196,7 +164,7 @@ export function ContactList({
         ) : (
           filteredChats.map((chat) => {
             const name = getDisplayName(chat)
-            const tags = parseTags(chat).slice(0, 3)
+            const tags = getChatTags(chat).slice(0, 3)
 
             return (
               <button
@@ -220,6 +188,27 @@ export function ContactList({
                     <span className="shrink-0 text-xs text-muted-foreground">{getTime(chat)}</span>
                   </div>
 
+                  {tags.length > 0 && (
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      {tags.map((tag) => (
+                        <Badge
+                          key={tag.id}
+                          className="h-5 border-0 bg-teal-600 px-1.5 text-[10px] font-medium text-white"
+                          style={
+                            tag.color
+                              ? {
+                                  backgroundColor: tag.color,
+                                  color: getReadableTextColor(tag.color),
+                                }
+                              : undefined
+                          }
+                        >
+                          {tag.label}
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
+
                   <div className="mt-0.5 flex items-center gap-1">
                     {chat.last_message_time && chat.text_last_message && (
                       <CheckCheck className="h-3.5 w-3.5 shrink-0 text-blue-500" />
@@ -233,19 +222,6 @@ export function ContactList({
                       </Badge>
                     )}
                   </div>
-
-                  {tags.length > 0 && (
-                    <div className="mt-1.5 flex flex-wrap gap-1">
-                      {tags.map((tag) => (
-                        <Badge
-                          key={tag}
-                          className="h-5 border-0 bg-teal-600 px-1.5 text-[10px] font-medium text-white"
-                        >
-                          {tag}
-                        </Badge>
-                      ))}
-                    </div>
-                  )}
                 </div>
               </button>
             )

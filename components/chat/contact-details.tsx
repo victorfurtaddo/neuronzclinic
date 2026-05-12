@@ -14,6 +14,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
+import { getChatTags, getReadableTextColor } from "@/lib/chat-tags"
 import { ChatRecord } from "@/lib/supabase-rest"
 
 interface ContactDetailsProps {
@@ -29,32 +30,12 @@ function getPhone(chat?: ChatRecord) {
   return chat?.phone_contact || chat?.chat_id?.replace("@s.whatsapp.net", "") || ""
 }
 
-function parseTags(chat?: ChatRecord): string[] {
-  if (!chat) return []
-  const candidates = [chat.json_tags_parsed, chat.json_tags, chat.tag_chat_array]
-
-  for (const candidate of candidates) {
-    if (!candidate) continue
-    if (Array.isArray(candidate)) return candidate.map(String).filter(Boolean)
-    if (typeof candidate === "string") {
-      try {
-        const parsed = JSON.parse(candidate)
-        if (Array.isArray(parsed)) return parsed.map(String).filter(Boolean)
-      } catch {
-        return candidate.split(",").map((tag) => tag.trim()).filter(Boolean)
-      }
-    }
-  }
-
-  return chat.Status_chat ? [chat.Status_chat] : []
-}
-
 export function ContactDetails({ chat, onClose }: ContactDetailsProps) {
   const [activeTab, setActiveTab] = useState<"contato" | "detalhes">("detalhes")
   const [bottomTab, setBottomTab] = useState<"consultas" | "avisos">("consultas")
   const [isRead, setIsRead] = useState(false)
   const [infoExpanded, setInfoExpanded] = useState(true)
-  const tags = parseTags(chat)
+  const tags = getChatTags(chat)
   
   const tabs = [
     { id: "contato", label: "Contato" },
@@ -217,10 +198,18 @@ export function ContactDetails({ chat, onClose }: ContactDetailsProps) {
                 {tags.length > 0 ? (
                   tags.map((tag) => (
                     <span
-                      key={tag}
+                      key={tag.id}
                       className="flex items-center gap-1 rounded bg-teal-600 px-2 py-0.5 text-xs font-medium text-white"
+                      style={
+                        tag.color
+                          ? {
+                              backgroundColor: tag.color,
+                              color: getReadableTextColor(tag.color),
+                            }
+                          : undefined
+                      }
                     >
-                      {tag}
+                      {tag.label}
                     </span>
                   ))
                 ) : (
