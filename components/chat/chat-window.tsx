@@ -3,7 +3,7 @@
 import Image from "next/image";
 import type { UIEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Download, Eye, FileText, Mic, MoreHorizontal, Paperclip, PenLine, Send } from "lucide-react";
+import { Download, FileText, Mic, MoreHorizontal, Paperclip, Pause, PenLine, PlayIcon, Send } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -85,6 +85,51 @@ export function ChatWindow({ chat, messages, isLoading, isLoadingOlder, hasMoreM
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const previousScrollHeightRef = useRef<number | null>(null);
+
+  //audio
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+
+  const togglePlay = () => {
+    if (audioRef.current) {
+      if (isPlaying) audioRef.current.pause();
+      else audioRef.current.play();
+      setIsPlaying(!isPlaying);
+    }
+  };
+
+  const onTimeUpdate = () => {
+    if (audioRef.current) {
+      const current = audioRef.current.currentTime;
+      const total = audioRef.current.duration;
+      setCurrentTime(current);
+      setProgress((current / total) * 100);
+    }
+  };
+
+  const onLoadedMetadata = () => {
+    if (audioRef.current) setDuration(audioRef.current.duration);
+  };
+
+  const formatTime = (time: number) => {
+    const minutes = Math.floor(time / 60);
+    const seconds = Math.floor(time % 60);
+    return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+  };
+
+  const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const percentage = x / rect.width;
+    if (audioRef.current) {
+      audioRef.current.currentTime = percentage * audioRef.current.duration;
+    }
+  };
+
+  // audio ^^^^^^
 
   const groupedMessages = useMemo(() => {
     return messages.reduce<Array<{ date: string; items: MessageRecord[] }>>((groups, message) => {
@@ -228,48 +273,69 @@ export function ChatWindow({ chat, messages, isLoading, isLoadingOlder, hasMoreM
                             {message.participant && !fromMe && <p className="mb-1 text-sm font-medium text-(--chat-primary)">{message.participant}</p>}
 
                             {mediaUrl ? (
-                              <div className="flex min-w-52 max-w-full flex-col gap-2">
+                              <div className="flex max-w-full flex-col gap-2">
                                 {mediaKind === "image" && (
                                   <a href={mediaUrl} target="_blank" rel="noreferrer" className="block">
-                                    <Image src={mediaUrl} alt={message.content || "Imagem da conversa"} width={520} height={420} className="h-auto max-h-[420px] w-auto max-w-full rounded-md object-contain" loading="lazy" unoptimized />
+                                    <Image src={mediaUrl} alt={message.content || "Imagem"} width={520} height={420} className="h-auto max-h-[420px] w-auto max-w-full rounded-md object-contain" loading="lazy" unoptimized />
                                   </a>
                                 )}
 
                                 {mediaKind === "sticker" && (
-                                  <a href={mediaUrl} target="_blank" rel="noreferrer" className="block w-fit">
-                                    <Image src={mediaUrl} alt={message.content || "Figurinha da conversa"} width={128} height={128} className="h-32 w-32 rounded-md object-contain" loading="lazy" unoptimized />
-                                  </a>
+                                  <div className="block w-fit">
+                                    <Image src={mediaUrl} alt={message.content || "Figurinha"} width={128} height={128} className="h-32 w-32 rounded-md object-contain" loading="lazy" unoptimized />
+                                  </div>
                                 )}
 
                                 {mediaKind === "video" && <video src={mediaUrl} className="max-h-[420px] w-full max-w-[520px] rounded-md bg-black" controls preload="metadata" />}
 
-                                {mediaKind === "audio" && <audio src={mediaUrl} className="w-64 max-w-full" controls preload="metadata" />}
+                                {mediaKind === "audio" && (
+                                  <div className="flex items-end gap-3 bg-(--chat-background)/40 p-2 rounded-xl min-w-[260px]">
+                                    <button onClick={togglePlay} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-(--chat-primary) text-white hover:scale-105 transition-transform">
+                                      {isPlaying ? <Pause size={20} fill="currentColor" /> : <PlayIcon size={20} className="ml-1" fill="currentColor" />}
+                                    </button>
+
+                                    <div className="flex flex-1 flex-col gap-1 pr-2">
+                                      <div className="relative h-2 w-full bg-(--chat-muted-foreground)/20 rounded-full cursor-pointer" onClick={handleSeek}>
+                                        <div className="absolute h-full bg-(--chat-primary) rounded-full" style={{ width: `${progress}%` }} />
+                                        <div className="absolute h-4 w-4 bg-(--chat-primary) rounded-full -top-1 shadow-sm" style={{ left: `calc(${progress}% - 6px)` }} />
+                                      </div>
+                                      <div className="flex justify-between text-[10px] text-(--chat-muted-foreground) font-medium">
+                                        <span>{formatTime(currentTime)}</span>
+                                        <span>{formatTime(duration)}</span>
+                                      </div>
+                                    </div>
+
+                                    <audio ref={audioRef} src={mediaUrl} onTimeUpdate={onTimeUpdate} onLoadedMetadata={onLoadedMetadata} onEnded={() => setIsPlaying(false)} className="hidden" />
+                                  </div>
+                                )}
 
                                 {mediaKind === "file" && (
-                                  <div className="flex items-center gap-3 rounded-lg bg-white/50 p-3">
-                                    <FileText className="h-8 w-8 shrink-0 text-muted-foreground" />
+                                  <div className="flex items-center gap-3 rounded-lg bg-(--chat-background)/30 p-3">
+                                    <FileText className="h-8 w-8 shrink-0 text-(--chat-muted-foreground)" />
                                     <div className="min-w-0">
-                                      <p className="truncate text-sm font-medium text-foreground">{getFileName(message, mediaUrl)}</p>
-                                      <p className="truncate text-xs text-muted-foreground">{message.media_mime_type || message.message_type || "Arquivo"}</p>
+                                      <p className="truncate text-sm font-medium text-(--chat-foreground)">{getFileName(message, mediaUrl)}</p>
+                                      <p className="truncate text-xs text-(--chat-muted-foreground)">{message.media_mime_type || message.message_type || "Arquivo"}</p>
                                     </div>
                                   </div>
                                 )}
 
-                                {hasCaption && <p className="whitespace-pre-wrap break-words text-sm text-foreground">{message.content}</p>}
+                                {hasCaption && <p className="whitespace-pre-wrap break-words text-sm text-(--chat-foreground)">{message.content}</p>}
 
-                                <div className="flex gap-2">
-                                  <a href={mediaUrl} target="_blank" rel="noreferrer" className="flex flex-1 items-center justify-center gap-1 rounded bg-white/70 px-2 py-1.5 text-xs text-muted-foreground hover:bg-white">
-                                    <Eye className="h-3 w-3" />
-                                    Abrir
-                                  </a>
-                                  <a href={mediaUrl} download className="flex flex-1 items-center justify-center gap-1 rounded bg-white/70 px-2 py-1.5 text-xs text-muted-foreground hover:bg-white">
-                                    <Download className="h-3 w-3" />
-                                    Baixar
-                                  </a>
-                                </div>
+                                {mediaKind !== "sticker" && (
+                                  <div className="flex gap-2">
+                                    <a
+                                      href={mediaUrl}
+                                      download
+                                      className="flex flex-1 items-center justify-center gap-2 rounded bg-(--chat-card)/80 py-2 text-xs font-medium text-(--chat-muted-foreground) transition-colors hover:bg-(--chat-card)"
+                                    >
+                                      <Download className="h-3.5 w-3.5" />
+                                      Baixar Arquivo
+                                    </a>
+                                  </div>
+                                )}
                               </div>
                             ) : (
-                              <p className="whitespace-pre-wrap wrap-break-word text-sm text-(--chat-foreground)">{getMessageText(message)}</p>
+                              <p className="whitespace-pre-wrap break-words text-sm text-(--chat-foreground)">{getMessageText(message)}</p>
                             )}
 
                             <p className="mt-1 text-right text-[10px] text-(--chat-muted-foreground) opacity-70">{getTimeLabel(message.timestamp_msg)}</p>
