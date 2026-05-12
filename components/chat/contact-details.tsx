@@ -1,78 +1,47 @@
-"use client"
+"use client";
 
-import { useState } from "react"
-import { cn } from "@/lib/utils"
-import {
-  X,
-  Pencil,
-  Check,
-  ChevronDown,
-  Calendar,
-  FileText,
-  Phone,
-} from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Switch } from "@/components/ui/switch"
-import { getChatTags, getReadableTextColor } from "@/lib/chat-tags"
-import { ChatRecord } from "@/lib/supabase-rest"
+import { useState } from "react";
+import { cn } from "@/lib/utils";
+import { X, Pencil, Check, ChevronDown, Calendar, FileText, Phone } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
+import { getChatTags, getReadableTextColor } from "@/lib/chat-tags";
+import { ChatRecord } from "@/lib/supabase-rest";
 
 interface ContactDetailsProps {
-  chat?: ChatRecord
-  onClose?: () => void
+  chat?: ChatRecord;
+  onClose?: () => void;
 }
 
 function getDisplayName(chat?: ChatRecord) {
-  return chat?.nome_contato || chat?.pushname || chat?.chat_id?.replace("@s.whatsapp.net", "") || "Contato sem nome"
+  return chat?.nome_contato || chat?.pushname || chat?.chat_id?.replace("@s.whatsapp.net", "") || "Contato sem nome";
 }
 
 function getPhone(chat?: ChatRecord) {
-  return chat?.phone_contact || chat?.chat_id?.replace("@s.whatsapp.net", "") || ""
+  return chat?.phone_contact || chat?.chat_id?.replace("@s.whatsapp.net", "") || "";
 }
 
 export function ContactDetails({ chat, onClose }: ContactDetailsProps) {
-  const [activeTab, setActiveTab] = useState<"contato" | "detalhes">("detalhes")
-  const [bottomTab, setBottomTab] = useState<"consultas" | "avisos">("consultas")
-  const [isRead, setIsRead] = useState(false)
-  const [infoExpanded, setInfoExpanded] = useState(true)
-  const tags = getChatTags(chat)
-  
-  const tabs = [
-    { id: "contato", label: "Contato" },
-    { id: "detalhes", label: "Detalhes" },
-  ] as const
+  const [activeTab, setActiveTab] = useState<"contato" | "detalhes">("detalhes");
+  const [bottomTab, setBottomTab] = useState<"consultas" | "avisos">("consultas");
+  const [isRead, setIsRead] = useState(false);
+  const [infoExpanded, setInfoExpanded] = useState(true);
+  const tags = getChatTags(chat);
 
   const bottomTabs = [
     { id: "consultas", label: "Consultas" },
     { id: "avisos", label: "Avisos / Tarefas" },
-  ] as const
+  ] as const;
 
   return (
-    <div className="flex h-full w-80 flex-col border-l border-border bg-card">
+    <div className="flex h-full w-full flex-col border-l border-border bg-card">
       {/* Header with tabs */}
       <div className="flex items-center justify-between border-b border-border px-4 py-3">
         <div className="flex items-center gap-4">
-          {tabs.map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={cn(
-                "text-sm font-medium transition-colors",
-                activeTab === tab.id
-                  ? "text-foreground"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
-            >
-              {tab.label}
-            </button>
-          ))}
+          <label className="text-sm font-medium transition-colors text-foreground">Contato | Detalhes</label>
         </div>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-7 w-7 text-muted-foreground hover:text-foreground"
-          onClick={onClose}
-        >
+        <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" onClick={onClose}>
           <X className="h-4 w-4" />
         </Button>
       </div>
@@ -85,10 +54,7 @@ export function ContactDetails({ chat, onClose }: ContactDetailsProps) {
             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-muted">
               <div className="h-5 w-5 rounded bg-gradient-to-br from-gray-300 to-gray-400" />
             </div>
-            <button
-              className="flex items-center gap-1 rounded px-2.5 py-1 text-xs font-medium text-white"
-              style={{ backgroundColor: chat?.hex_status || (chat?.finalizada ? "#6b7280" : "#22c55e") }}
-            >
+            <button className="flex items-center gap-1 rounded px-2.5 py-1 text-xs font-medium text-white" style={{ backgroundColor: chat?.hex_status || (chat?.finalizada ? "#6b7280" : "#22c55e") }}>
               {chat?.finalizada ? "Finalizada" : chat?.Status_chat || "Aberta"}
               <ChevronDown className="h-3 w-3" />
             </button>
@@ -120,11 +86,7 @@ export function ContactDetails({ chat, onClose }: ContactDetailsProps) {
         {/* Contact name */}
         <div className="mb-4">
           <div className="flex items-center gap-2">
-            <Input
-              value={getDisplayName(chat)}
-              readOnly
-              className="flex-1 border-0 border-b border-border bg-transparent px-0 text-base font-medium focus-visible:ring-0 rounded-none"
-            />
+            <Input value={getDisplayName(chat)} readOnly className="flex-1 border-0 border-b border-border bg-transparent px-0 text-base font-medium focus-visible:ring-0 rounded-none" />
             <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground">
               <Pencil className="h-4 w-4" />
             </Button>
@@ -134,18 +96,14 @@ export function ContactDetails({ chat, onClose }: ContactDetailsProps) {
         {/* Status dropdowns row */}
         <div className="mb-4 grid grid-cols-2 gap-3">
           <div>
-            <label className="mb-1.5 block text-xs text-muted-foreground">
-              Status contato
-            </label>
+            <label className="mb-1.5 block text-xs text-muted-foreground">Status contato</label>
             <button className="flex w-full items-center justify-between rounded bg-red-500 px-3 py-1.5 text-sm font-medium text-white">
               {chat?.Status_chat || "Nenhum"}
               <ChevronDown className="h-4 w-4" />
             </button>
           </div>
           <div>
-            <label className="mb-1.5 block text-xs text-muted-foreground">
-              Status agendamento
-            </label>
+            <label className="mb-1.5 block text-xs text-muted-foreground">Status agendamento</label>
             <button className="flex w-full items-center justify-between rounded bg-muted px-3 py-1.5 text-sm text-muted-foreground">
               Nenhum
               <ChevronDown className="h-4 w-4" />
@@ -167,10 +125,7 @@ export function ContactDetails({ chat, onClose }: ContactDetailsProps) {
 
         {/* Collapsible info section */}
         <div className="mb-4">
-          <button
-            onClick={() => setInfoExpanded(!infoExpanded)}
-            className="flex w-full items-center justify-between py-2 text-sm font-medium text-foreground"
-          >
+          <button onClick={() => setInfoExpanded(!infoExpanded)} className="flex w-full items-center justify-between py-2 text-sm font-medium text-foreground">
             Informações do contato
             <ChevronDown className={cn("h-4 w-4 transition-transform", infoExpanded && "rotate-180")} />
           </button>
@@ -180,9 +135,7 @@ export function ContactDetails({ chat, onClose }: ContactDetailsProps) {
           <>
             {/* Interesses */}
             <div className="mb-4">
-              <label className="mb-1.5 block text-sm font-medium text-foreground">
-                Interesses
-              </label>
+              <label className="mb-1.5 block text-sm font-medium text-foreground">Interesses</label>
               <button className="flex w-full items-center justify-between rounded border border-border bg-card px-3 py-2 text-sm text-muted-foreground">
                 <span></span>
                 <ChevronDown className="h-4 w-4" />
@@ -191,9 +144,7 @@ export function ContactDetails({ chat, onClose }: ContactDetailsProps) {
 
             {/* Tags do contato */}
             <div className="mb-4">
-              <label className="mb-1.5 block text-sm font-medium text-foreground">
-                Tags do contato
-              </label>
+              <label className="mb-1.5 block text-sm font-medium text-foreground">Tags do contato</label>
               <div className="flex flex-wrap items-center gap-2 rounded border border-border bg-card px-3 py-2">
                 {tags.length > 0 ? (
                   tags.map((tag) => (
@@ -221,13 +172,8 @@ export function ContactDetails({ chat, onClose }: ContactDetailsProps) {
 
             {/* Anotações */}
             <div className="mb-4">
-              <label className="mb-1.5 block text-sm font-medium text-foreground">
-                Anotações
-              </label>
-              <textarea
-                className="min-h-[100px] w-full resize-none rounded border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-                placeholder=""
-              />
+              <label className="mb-1.5 block text-sm font-medium text-foreground">Anotações</label>
+              <textarea className="min-h-[100px] w-full resize-none rounded border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring" placeholder="" />
             </div>
           </>
         )}
@@ -240,27 +186,16 @@ export function ContactDetails({ chat, onClose }: ContactDetailsProps) {
             <button
               key={tab.id}
               onClick={() => setBottomTab(tab.id)}
-              className={cn(
-                "flex-1 border-b-2 px-4 py-3 text-sm font-medium transition-colors",
-                bottomTab === tab.id
-                  ? "border-foreground text-foreground"
-                  : "border-transparent text-muted-foreground hover:text-foreground"
-              )}
+              className={cn("flex-1 border-b-2 px-4 py-3 text-sm font-medium transition-colors", bottomTab === tab.id ? "border-foreground text-foreground" : "border-transparent text-muted-foreground hover:text-foreground")}
             >
               {tab.label}
             </button>
           ))}
         </div>
-        
+
         {/* Tab content placeholder */}
-        <div className="h-32 p-4">
-          {bottomTab === "consultas" ? (
-            <p className="text-sm text-muted-foreground">Nenhuma consulta registrada</p>
-          ) : (
-            <p className="text-sm text-muted-foreground">Nenhum aviso ou tarefa</p>
-          )}
-        </div>
+        <div className="h-32 p-4">{bottomTab === "consultas" ? <p className="text-sm text-muted-foreground">Nenhuma consulta registrada</p> : <p className="text-sm text-muted-foreground">Nenhum aviso ou tarefa</p>}</div>
       </div>
     </div>
-  )
+  );
 }

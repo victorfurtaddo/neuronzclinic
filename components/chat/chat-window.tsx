@@ -3,13 +3,12 @@
 import Image from "next/image";
 import type { UIEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Download, FileText, Mic, MoreHorizontal, Paperclip, Pause, PenLine, PlayIcon, Send } from "lucide-react";
+import { Download, FileText, Info, Mic, Paperclip, Pause, PenLine, PlayIcon, Send } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { ChatRecord, MessageRecord } from "@/lib/supabase-rest";
-import { ContactDetails } from "./contact-details";
 
 interface ChatWindowProps {
   chat?: ChatRecord;
@@ -20,6 +19,8 @@ interface ChatWindowProps {
   onLoadOlderMessages?: () => Promise<number>;
   onCloseChat?: () => void;
   error?: string;
+  onToggleDetails: () => void;
+  isDetailsOpen: boolean;
 }
 
 function getDisplayName(chat?: ChatRecord) {
@@ -80,8 +81,7 @@ function getFileName(message: MessageRecord, mediaUrl: string) {
   return name ? decodeURIComponent(name) : message.media_mime_type || message.message_type || "Arquivo";
 }
 
-export function ChatWindow({ chat, messages, isLoading, isLoadingOlder, hasMoreMessages, onLoadOlderMessages, onCloseChat, error }: ChatWindowProps) {
-  const [isDetailsOpen, setIsDetailsOpen] = useState(false);
+export function ChatWindow({ chat, messages, isLoading, isLoadingOlder, hasMoreMessages, onLoadOlderMessages, onCloseChat, error, onToggleDetails }: ChatWindowProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const previousScrollHeightRef = useRef<number | null>(null);
@@ -166,7 +166,6 @@ export function ChatWindow({ chat, messages, isLoading, isLoadingOlder, hasMoreM
       if (event.key !== "Escape") return;
 
       event.preventDefault();
-      setIsDetailsOpen(false);
       onCloseChat?.();
     }
 
@@ -187,15 +186,15 @@ export function ChatWindow({ chat, messages, isLoading, isLoadingOlder, hasMoreM
   }
 
   if (!chat) {
-    return <div className="flex flex-1 items-center justify-center bg-background px-6 text-center text-sm text-muted-foreground">Selecione um contato para visualizar a conversa.</div>;
+    return <div className="flex flex-1 items-center justify-center h-full bg-background px-6 text-center text-sm text-muted-foreground">Selecione um contato para visualizar a conversa.</div>;
   }
 
   return (
     <div className="flex h-full flex-1 overflow-hidden bg-background">
       <div className="flex flex-1 flex-col border-r border-border">
         <div className="flex items-center justify-between border-b border-border bg-card px-4 py-3">
-          <div className="flex items-center gap-3">
-            <button onClick={() => setIsDetailsOpen(true)} className="rounded-full transition-opacity hover:opacity-90" aria-label="Abrir detalhes do contato">
+          <div onClick={onToggleDetails} className="flex items-center gap-3 cursor-pointer">
+            <button className="rounded-full transition-opacity hover:opacity-90 cursor-pointer" aria-label="Abrir detalhes do contato">
               <Avatar className="h-10 w-10">
                 <AvatarImage src={chat.url_foto_perfil ?? undefined} alt={getDisplayName(chat)} />
                 <AvatarFallback className="bg-gradient-to-br from-teal-500 to-teal-700 text-sm font-semibold text-white">{getDisplayName(chat).slice(0, 1).toUpperCase()}</AvatarFallback>
@@ -209,8 +208,8 @@ export function ChatWindow({ chat, messages, isLoading, isLoadingOlder, hasMoreM
 
           <div className="flex items-center gap-2">
             <Button className="bg-teal-500 px-4 font-medium text-white hover:bg-teal-600">{chat.finalizada ? "Reabrir" : "Finalizar"}</Button>
-            <Button variant="ghost" size="icon" onClick={() => setIsDetailsOpen(!isDetailsOpen)} className={cn("text-muted-foreground hover:text-foreground", isDetailsOpen && "bg-muted")}>
-              <MoreHorizontal className="h-5 w-5" />
+            <Button onClick={onToggleDetails} variant="ghost" size="icon" className="text-muted-foreground hover:text-foreground cursor-pointer">
+              <Info className="h-5 w-5" />
             </Button>
           </div>
         </div>
@@ -369,8 +368,6 @@ export function ChatWindow({ chat, messages, isLoading, isLoadingOlder, hasMoreM
           </div>
         </div>
       </div>
-
-      {isDetailsOpen && <ContactDetails chat={chat} onClose={() => setIsDetailsOpen(false)} />}
     </div>
   );
 }
