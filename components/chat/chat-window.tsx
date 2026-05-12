@@ -1,5 +1,6 @@
 "use client"
 
+import Image from "next/image"
 import type { UIEvent } from "react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { Download, Eye, FileText, Mic, MoreHorizontal, Paperclip, PenLine, Send } from "lucide-react"
@@ -30,6 +31,7 @@ function getDateLabel(value: string | null) {
     day: "2-digit",
     month: "2-digit",
     year: "2-digit",
+    timeZone: "America/Sao_Paulo",
   }).format(new Date(value))
 }
 
@@ -39,6 +41,7 @@ function getTimeLabel(value: string | null) {
   return new Intl.DateTimeFormat("pt-BR", {
     hour: "2-digit",
     minute: "2-digit",
+    timeZone: "America/Sao_Paulo",
   }).format(new Date(value))
 }
 
@@ -49,7 +52,30 @@ function getMessageText(message: MessageRecord) {
 }
 
 function getMediaUrl(message: MessageRecord) {
-  return message.public_media_url || message.media_url
+  if (message.public_media_url) return message.public_media_url
+  if (message.media_url) return message.media_url
+
+  const path = message.media_path?.replace(/^file\//, "")
+  if (!path) return null
+
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_REST_URL?.replace(/\/rest\/v1\/?$/, "")
+  return supabaseUrl ? `${supabaseUrl}/storage/v1/object/public/file/${path}` : null
+}
+
+function getMediaKind(message: MessageRecord) {
+  const type = `${message.media_mime_type || ""} ${message.message_type || ""}`.toLowerCase()
+
+  if (type.includes("sticker") || type.includes("figurinha")) return "sticker"
+  if (type.includes("image")) return "image"
+  if (type.includes("video")) return "video"
+  if (type.includes("audio")) return "audio"
+  return "file"
+}
+
+function getFileName(message: MessageRecord, mediaUrl: string) {
+  const source = message.media_path || mediaUrl
+  const name = source.split("?")[0]?.split("/").pop()
+  return name ? decodeURIComponent(name) : message.media_mime_type || message.message_type || "Arquivo"
 }
 
 export function ChatWindow({
@@ -209,6 +235,8 @@ export function ChatWindow({
                     {group.items.map((message) => {
                       const fromMe = !!message.from_me
                       const mediaUrl = getMediaUrl(message)
+                      const mediaKind = getMediaKind(message)
+                      const hasCaption = !!message.content?.trim()
 
                       return (
                         <div
@@ -228,26 +256,82 @@ export function ChatWindow({
                             )}
 
                             {mediaUrl ? (
-                              <div className="flex min-w-52 flex-col gap-2 rounded-lg bg-white/50 p-3">
-                                <FileText className="h-8 w-8 text-muted-foreground" />
-                                <p className="break-all text-xs text-foreground">
-                                  {message.media_mime_type || message.message_type || "Arquivo"}
-                                </p>
+                              <div className="flex min-w-52 max-w-full flex-col gap-2">
+                                {mediaKind === "image" && (
+                                  <a href={mediaUrl} target="_blank" rel="noreferrer" className="block">
+                                    <Image
+                                      src={mediaUrl}
+                                      alt={message.content || "Imagem da conversa"}
+                                      width={520}
+                                      height={420}
+                                      className="h-auto max-h-[420px] w-auto max-w-full rounded-md object-contain"
+                                      loading="lazy"
+                                      unoptimized
+                                    />
+                                  </a>
+                                )}
+
+                                {mediaKind === "sticker" && (
+                                  <a href={mediaUrl} target="_blank" rel="noreferrer" className="block w-fit">
+                                    <Image
+                                      src={mediaUrl}
+                                      alt={message.content || "Figurinha da conversa"}
+                                      width={128}
+                                      height={128}
+                                      className="h-32 w-32 rounded-md object-contain"
+                                      loading="lazy"
+                                      unoptimized
+                                    />
+                                  </a>
+                                )}
+
+                                {mediaKind === "video" && (
+                                  <video
+                                    src={mediaUrl}
+                                    className="max-h-[420px] w-full max-w-[520px] rounded-md bg-black"
+                                    controls
+                                    preload="metadata"
+                                  />
+                                )}
+
+                                {mediaKind === "audio" && (
+                                  <audio src={mediaUrl} className="w-64 max-w-full" controls preload="metadata" />
+                                )}
+
+                                {mediaKind === "file" && (
+                                  <div className="flex items-center gap-3 rounded-lg bg-white/50 p-3">
+                                    <FileText className="h-8 w-8 shrink-0 text-muted-foreground" />
+                                    <div className="min-w-0">
+                                      <p className="truncate text-sm font-medium text-foreground">
+                                        {getFileName(message, mediaUrl)}
+                                      </p>
+                                      <p className="truncate text-xs text-muted-foreground">
+                                        {message.media_mime_type || message.message_type || "Arquivo"}
+                                      </p>
+                                    </div>
+                                  </div>
+                                )}
+
+                                {hasCaption && (
+                                  <p className="whitespace-pre-wrap break-words text-sm text-foreground">
+                                    {message.content}
+                                  </p>
+                                )}
+
                                 <div className="flex gap-2">
                                   <a
                                     href={mediaUrl}
                                     target="_blank"
                                     rel="noreferrer"
-                                    className="flex flex-1 items-center justify-center gap-1 rounded bg-white/80 px-2 py-1.5 text-xs text-muted-foreground hover:bg-white"
+                                    className="flex flex-1 items-center justify-center gap-1 rounded bg-white/70 px-2 py-1.5 text-xs text-muted-foreground hover:bg-white"
                                   >
                                     <Eye className="h-3 w-3" />
-                                    Visualizar
+                                    Abrir
                                   </a>
                                   <a
                                     href={mediaUrl}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    className="flex flex-1 items-center justify-center gap-1 rounded bg-white/80 px-2 py-1.5 text-xs text-muted-foreground hover:bg-white"
+                                    download
+                                    className="flex flex-1 items-center justify-center gap-1 rounded bg-white/70 px-2 py-1.5 text-xs text-muted-foreground hover:bg-white"
                                   >
                                     <Download className="h-3 w-3" />
                                     Baixar

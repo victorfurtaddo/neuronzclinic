@@ -28,7 +28,7 @@ export default function RootLayout({
   return (
     <html lang="pt-br" suppressHydrationWarning>
       <body className={`${geistSans.variable} ${geistMono.variable} font-sans antialiased flex h-screen overflow-hidden`}>
-        <ThemeProvider attribute="class">
+        <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false} disableTransitionOnChange>
           <Sidebar isCollapsed={isCollapsed} setIsCollapsed={setIsCollapsed} />
 
           <main className="flex-1 overflow-y-auto bg-background">{children}</main>

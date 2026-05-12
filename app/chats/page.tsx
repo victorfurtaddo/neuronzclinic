@@ -10,23 +10,56 @@ const MESSAGE_PAGE_SIZE = 50
 
 export default function ChatsPage() {
   const [chats, setChats] = useState<ChatRecord[]>([])
+  const [searchChats, setSearchChats] = useState<ChatRecord[]>([])
   const [messages, setMessages] = useState<MessageRecord[]>([])
   const [messagesChatId, setMessagesChatId] = useState<string>()
   const [selectedChatId, setSelectedChatId] = useState<string>()
+  const [search, setSearch] = useState("")
+  const [debouncedSearch, setDebouncedSearch] = useState("")
   const [isLoadingChats, setIsLoadingChats] = useState(true)
   const [isLoadingMoreChats, setIsLoadingMoreChats] = useState(false)
+  const [searchChatsTerm, setSearchChatsTerm] = useState("")
+  const [isLoadingMoreSearchChats, setIsLoadingMoreSearchChats] = useState(false)
   const [hasMoreChats, setHasMoreChats] = useState(true)
+  const [hasMoreSearchChats, setHasMoreSearchChats] = useState(false)
   const [isLoadingOlderMessages, setIsLoadingOlderMessages] = useState(false)
   const [hasMoreMessages, setHasMoreMessages] = useState(false)
   const [error, setError] = useState<string>()
 
+  const isSearching = !!debouncedSearch.trim()
+  const isSearchingChats = isSearching && searchChatsTerm !== debouncedSearch.trim()
+  const visibleChats = isSearching ? searchChats : chats
   const selectedChat = useMemo(
-    () => chats.find((chat) => chat.id === selectedChatId) ?? chats[0],
-    [chats, selectedChatId],
+    () => visibleChats.find((chat) => chat.id === selectedChatId) ?? visibleChats[0],
+    [selectedChatId, visibleChats],
   )
   const selectedChatRemoteId = selectedChat?.chat_id
 
   const loadMoreChats = useCallback(async () => {
+    if (isSearching) {
+      if (isLoadingMoreSearchChats || !hasMoreSearchChats) return
+
+      setIsLoadingMoreSearchChats(true)
+
+      try {
+        const data = await fetchChats({
+          limit: CHAT_PAGE_SIZE,
+          offset: searchChats.length,
+          search: debouncedSearch,
+        })
+        setSearchChats((current) => {
+          const knownIds = new Set(current.map((chat) => chat.id))
+          return [...current, ...data.filter((chat) => !knownIds.has(chat.id))]
+        })
+        setHasMoreSearchChats(data.length === CHAT_PAGE_SIZE)
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Nao foi possivel carregar mais resultados.")
+      } finally {
+        setIsLoadingMoreSearchChats(false)
+      }
+      return
+    }
+
     if (isLoadingMoreChats || !hasMoreChats) return
 
     setIsLoadingMoreChats(true)
@@ -43,7 +76,16 @@ export default function ChatsPage() {
     } finally {
       setIsLoadingMoreChats(false)
     }
-  }, [chats.length, hasMoreChats, isLoadingMoreChats])
+  }, [
+    chats.length,
+    debouncedSearch,
+    hasMoreChats,
+    hasMoreSearchChats,
+    isLoadingMoreChats,
+    isLoadingMoreSearchChats,
+    isSearching,
+    searchChats.length,
+  ])
 
   const loadOlderMessages = useCallback(async () => {
     if (!selectedChatRemoteId || isLoadingOlderMessages || !hasMoreMessages) return 0
@@ -97,6 +139,44 @@ export default function ChatsPage() {
   }, [])
 
   useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      setDebouncedSearch(search.trim())
+    }, 350)
+
+    return () => window.clearTimeout(timeout)
+  }, [search])
+
+  useEffect(() => {
+    const term = debouncedSearch.trim()
+
+    if (!term) {
+      return
+    }
+
+    let isMounted = true
+
+    fetchChats({ limit: CHAT_PAGE_SIZE, offset: 0, search: term })
+      .then((data) => {
+        if (!isMounted) return
+        setSearchChats(data)
+        setSearchChatsTerm(term)
+        setSelectedChatId(data[0]?.id)
+        setHasMoreSearchChats(data.length === CHAT_PAGE_SIZE)
+      })
+      .catch((err) => {
+        if (!isMounted) return
+        setSearchChats([])
+        setSearchChatsTerm(term)
+        setHasMoreSearchChats(false)
+        setError(err instanceof Error ? err.message : "Nao foi possivel buscar os chats.")
+      })
+
+    return () => {
+      isMounted = false
+    }
+  }, [debouncedSearch])
+
+  useEffect(() => {
     if (!selectedChatRemoteId) {
       return
     }
@@ -126,20 +206,23 @@ export default function ChatsPage() {
   return (
     <div className="flex h-screen overflow-hidden bg-background">
       <ContactList
-        chats={chats}
+        chats={visibleChats}
+        search={search}
         isLoading={isLoadingChats}
-        isLoadingMore={isLoadingMoreChats}
-        hasMore={hasMoreChats}
+        isLoadingMore={isSearching ? isLoadingMoreSearchChats : isLoadingMoreChats}
+        isSearching={isSearchingChats}
+        hasMore={isSearching ? hasMoreSearchChats : hasMoreChats}
         selectedId={selectedChat?.id}
+        onSearchChange={setSearch}
         onSelect={setSelectedChatId}
         onLoadMore={loadMoreChats}
       />
       <ChatWindow
         chat={selectedChat}
-        messages={messages}
+        messages={selectedChatRemoteId ? messages : []}
         isLoading={!!selectedChat?.chat_id && messagesChatId !== selectedChat.chat_id}
         isLoadingOlder={isLoadingOlderMessages}
-        hasMoreMessages={hasMoreMessages}
+        hasMoreMessages={!!selectedChatRemoteId && hasMoreMessages}
         onLoadOlderMessages={loadOlderMessages}
         error={error}
       />

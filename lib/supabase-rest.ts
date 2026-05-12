@@ -76,7 +76,15 @@ interface PaginationOptions {
   offset?: number
 }
 
-export function fetchChats({ limit = 50, offset = 0 }: PaginationOptions = {}) {
+interface ChatQueryOptions extends PaginationOptions {
+  search?: string
+}
+
+function escapePostgrestPattern(value: string) {
+  return value.replace(/[%*_]/g, (character) => `\\${character}`)
+}
+
+export function fetchChats({ limit = 50, offset = 0, search }: ChatQueryOptions = {}) {
   const select = [
     "id",
     "chat_id",
@@ -104,9 +112,22 @@ export function fetchChats({ limit = 50, offset = 0 }: PaginationOptions = {}) {
     "lid_id",
     "updated_at",
   ].join(",")
+  const term = search?.trim()
+  const searchFilter = term
+    ? `&or=(${[
+        "nome_contato",
+        "pushname",
+        "phone_contact",
+        "chat_id",
+        "text_last_message",
+        "Status_chat",
+      ]
+        .map((field) => `${field}.ilike.*${encodeURIComponent(escapePostgrestPattern(term))}*`)
+        .join(",")})`
+    : ""
 
   return supabaseGet<ChatRecord[]>(
-    `chats?select=${select}&archived=is.false&order=last_message_time.desc.nullslast&limit=${limit}&offset=${offset}`,
+    `chats?select=${select}&archived=is.false${searchFilter}&order=last_message_time.desc.nullslast&limit=${limit}&offset=${offset}`,
   )
 }
 

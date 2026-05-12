@@ -13,10 +13,13 @@ import { ChatRecord } from "@/lib/supabase-rest"
 
 interface ContactListProps {
   chats: ChatRecord[]
+  search: string
   isLoading?: boolean
   isLoadingMore?: boolean
+  isSearching?: boolean
   hasMore?: boolean
   selectedId?: string
+  onSearchChange?: (value: string) => void
   onSelect?: (id: string) => void
   onLoadMore?: () => void
 }
@@ -46,6 +49,7 @@ function getTime(chat: ChatRecord) {
     return new Intl.DateTimeFormat("pt-BR", {
       hour: "2-digit",
       minute: "2-digit",
+      timeZone: "America/Sao_Paulo",
     }).format(new Date(chat.last_message_time))
   }
 
@@ -87,29 +91,25 @@ function parseTags(chat: ChatRecord): string[] {
 
 export function ContactList({
   chats,
+  search,
   isLoading,
   isLoadingMore,
+  isSearching,
   hasMore,
   selectedId,
+  onSearchChange,
   onSelect,
   onLoadMore,
 }: ContactListProps) {
   const [activeFilter, setActiveFilter] = useState("all")
-  const [search, setSearch] = useState("")
 
   const filteredChats = useMemo(() => {
-    const term = search.trim().toLowerCase()
-
     return chats.filter((chat) => {
       if (activeFilter === "ai" && !chat.ia_responde) return false
       if (activeFilter === "mine" && !chat.dono) return false
-      if (!term) return true
-
-      return [getDisplayName(chat), chat.text_last_message, chat.phone_contact, chat.chat_id]
-        .filter(Boolean)
-        .some((value) => value!.toLowerCase().includes(term))
+      return true
     })
-  }, [activeFilter, chats, search])
+  }, [activeFilter, chats])
 
   function handleListScroll(event: UIEvent<HTMLDivElement>) {
     const target = event.currentTarget
@@ -152,7 +152,7 @@ export function ContactList({
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               value={search}
-              onChange={(event) => setSearch(event.target.value)}
+              onChange={(event) => onSearchChange?.(event.target.value)}
               placeholder="Procure a conversa"
               className="h-9 border-0 bg-secondary pl-9 text-sm"
             />
@@ -189,7 +189,7 @@ export function ContactList({
       </div>
 
       <div className="flex-1 overflow-y-auto" onScroll={handleListScroll}>
-        {isLoading ? (
+        {isLoading || isSearching ? (
           <div className="p-4 text-sm text-muted-foreground">Carregando conversas...</div>
         ) : filteredChats.length === 0 ? (
           <div className="p-4 text-sm text-muted-foreground">Nenhuma conversa encontrada.</div>
