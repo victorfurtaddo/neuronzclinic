@@ -2,21 +2,33 @@
 
 import Image from "next/image";
 import { useTheme } from "next-themes";
+import { useEffect, useState } from "react";
+import { cn } from "@/lib/utils";
 
 interface LogoProps {
   isCollapsed: boolean;
 }
 
 export function Logo({ isCollapsed }: LogoProps) {
-  const { resolvedTheme = "light" } = useTheme();
+  const { resolvedTheme } = useTheme();
+  const [mounted, setMounted] = useState(false);
 
-  const src = isCollapsed
-    ? resolvedTheme === "dark"
-      ? "/logo-icon-dark.png"
-      : "/logo-icon-light.png"
-    : resolvedTheme === "dark"
-      ? "/logo-full-dark.png"
-      : "/logo-full-light.png";
+  // 1. Esse useEffect garante que o código abaixo só rode no Cliente
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  if (!mounted) {
+    return <div className={cn("h-10", isCollapsed ? "w-10" : "w-32")} />;
+  }
+
+  let src = "/logo-full-dark.png";
+
+  if (isCollapsed) {
+    src = resolvedTheme === "dark" ? "/logos/logo-icon-dark.png" : "/logos/logo-icon-light.png";
+  } else {
+    src = resolvedTheme === "dark" ? "/logos/logo-full-dark.png" : "/logos/logo-full-light.png";
+  }
 
   return (
     <div className="flex w-full items-center px-3">

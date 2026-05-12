@@ -27,11 +27,8 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="pt-br" suppressHydrationWarning>
-      <body
-        suppressHydrationWarning
-        className={`${geistSans.variable} ${geistMono.variable} font-sans antialiased flex h-screen overflow-hidden`}
-      >
-        <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false} disableTransitionOnChange>
+      <body suppressHydrationWarning className={`${geistSans.variable} ${geistMono.variable} font-sans antialiased flex h-screen overflow-hidden`}>
+        <ThemeProvider attribute="class" disableTransitionOnChange>
           <AppShell>{children}</AppShell>
         </ThemeProvider>
         <Analytics />
@@ -39,4 +36,3 @@ export default function RootLayout({
     </html>
   );
 }
-
