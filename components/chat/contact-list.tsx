@@ -188,12 +188,26 @@ export function ContactList({
                     <span className="shrink-0 text-xs text-muted-foreground">{getTime(chat)}</span>
                   </div>
 
+                  <div className="mt-0.5 flex items-center gap-1">
+                    {chat.last_message_time && chat.text_last_message && (
+                      <CheckCheck className="h-3.5 w-3.5 shrink-0 text-blue-500" />
+                    )}
+                    <p className="truncate text-sm text-muted-foreground">
+                      {chat.text_last_message || "Sem mensagens recentes"}
+                    </p>
+                    {!!chat.unread_count && (
+                      <Badge className="ml-auto h-5 min-w-5 shrink-0 bg-green-500 px-1.5 text-[10px] font-medium text-white">
+                        {chat.unread_count}
+                      </Badge>
+                    )}
+                  </div>
+
                   {tags.length > 0 && (
-                    <div className="mt-1 flex flex-wrap gap-1">
+                    <div className="mt-1.5 flex flex-wrap gap-1">
                       {tags.map((tag) => (
                         <Badge
                           key={tag.id}
-                          className="h-5 border-0 bg-teal-600 px-1.5 text-[10px] font-medium text-white"
+                          className="h-4 border-0 bg-teal-600 px-1.5 text-[9px] font-medium leading-none text-white"
                           style={
                             tag.color
                               ? {
@@ -208,20 +222,6 @@ export function ContactList({
                       ))}
                     </div>
                   )}
-
-                  <div className="mt-0.5 flex items-center gap-1">
-                    {chat.last_message_time && chat.text_last_message && (
-                      <CheckCheck className="h-3.5 w-3.5 shrink-0 text-blue-500" />
-                    )}
-                    <p className="truncate text-sm text-muted-foreground">
-                      {chat.text_last_message || "Sem mensagens recentes"}
-                    </p>
-                    {!!chat.unread_count && (
-                      <Badge className="ml-auto h-5 min-w-5 shrink-0 bg-green-500 px-1.5 text-[10px] font-medium text-white">
-                        {chat.unread_count}
-                      </Badge>
-                    )}
-                  </div>
                 </div>
               </button>
             )
