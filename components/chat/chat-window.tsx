@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { ChatRecord, MessageRecord } from "@/lib/supabase-rest";
 import { ContactDetails } from "./contact-details";
+import { MessageStatusIcon } from "./message-status-icon";
 
 interface ChatWindowProps {
   chat?: ChatRecord;
@@ -338,7 +339,14 @@ export function ChatWindow({ chat, messages, isLoading, isLoadingOlder, hasMoreM
                               <p className="whitespace-pre-wrap break-words text-sm text-(--chat-foreground)">{getMessageText(message)}</p>
                             )}
 
-                            <p className="mt-1 text-right text-[10px] text-(--chat-muted-foreground) opacity-70">{getTimeLabel(message.timestamp_msg)}</p>
+                            <div className="mt-1 flex items-center justify-end gap-1 text-[10px] text-(--chat-muted-foreground) opacity-70">
+                              <span>{getTimeLabel(message.timestamp_msg)}</span>
+                              <MessageStatusIcon
+                                fromMe={message.from_me}
+                                status={message.status}
+                                timestamp={message.timestamp_msg}
+                              />
+                            </div>
                           </div>
                         </div>
                       );

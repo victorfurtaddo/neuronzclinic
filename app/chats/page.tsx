@@ -3,7 +3,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { ContactList } from "@/components/chat/contact-list"
 import { ChatWindow } from "@/components/chat/chat-window"
-import { ChatRecord, MessageRecord, fetchChats, fetchMessages } from "@/lib/supabase-rest"
+import {
+  ChatRecord,
+  LatestMessageStatus,
+  MessageRecord,
+  fetchChats,
+  fetchLatestMessageStatuses,
+  fetchMessages,
+} from "@/lib/supabase-rest"
 
 const CHAT_PAGE_SIZE = 50
 const MESSAGE_PAGE_SIZE = 50
@@ -12,6 +19,7 @@ export default function ChatsPage() {
   const [chats, setChats] = useState<ChatRecord[]>([])
   const [searchChats, setSearchChats] = useState<ChatRecord[]>([])
   const [messages, setMessages] = useState<MessageRecord[]>([])
+  const [latestMessageStatuses, setLatestMessageStatuses] = useState<Record<string, LatestMessageStatus>>({})
   const [messagesChatId, setMessagesChatId] = useState<string>()
   const [selectedChatId, setSelectedChatId] = useState<string>()
   const [search, setSearch] = useState("")
@@ -202,6 +210,30 @@ export default function ChatsPage() {
     }
   }, [selectedChatRemoteId])
 
+  useEffect(() => {
+    const chatIds = visibleChats
+      .map((chat) => chat.chat_id)
+      .filter((chatId) => !(chatId in latestMessageStatuses))
+
+    if (chatIds.length === 0) return
+
+    let isMounted = true
+
+    fetchLatestMessageStatuses(chatIds)
+      .then((statuses) => {
+        if (!isMounted) return
+        setLatestMessageStatuses((current) => ({ ...current, ...statuses }))
+      })
+      .catch((err) => {
+        if (!isMounted) return
+        setError(err instanceof Error ? err.message : "Nao foi possivel carregar os status das mensagens.")
+      })
+
+    return () => {
+      isMounted = false
+    }
+  }, [latestMessageStatuses, visibleChats])
+
   return (
     <div className="flex h-screen overflow-hidden bg-background">
       <ContactList
@@ -212,6 +244,7 @@ export default function ChatsPage() {
         isSearching={isSearchingChats}
         hasMore={isSearching ? hasMoreSearchChats : hasMoreChats}
         selectedId={selectedChat?.id}
+        latestMessageStatuses={latestMessageStatuses}
         onSearchChange={setSearch}
         onSelect={setSelectedChatId}
         onLoadMore={loadMoreChats}

@@ -2,7 +2,7 @@
 
 import type { UIEvent } from "react"
 import { useEffect, useMemo, useState } from "react"
-import { Bot, CheckCheck, ChevronDown, ChevronUp, Contact, Filter, FilterX, Pencil, Search, SlidersHorizontal, SquarePlus } from "lucide-react"
+import { Bot, ChevronDown, ChevronUp, Contact, Filter, FilterX, Pencil, Search, SlidersHorizontal, SquarePlus } from "lucide-react"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -11,7 +11,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch"
 import { getChatTags, getReadableTextColor } from "@/lib/chat-tags"
 import { cn } from "@/lib/utils"
-import { ChatRecord } from "@/lib/supabase-rest"
+import { ChatRecord, LatestMessageStatus } from "@/lib/supabase-rest"
+import { MessageStatusIcon } from "./message-status-icon"
 
 interface ContactListProps {
   chats: ChatRecord[]
@@ -21,6 +22,7 @@ interface ContactListProps {
   isSearching?: boolean
   hasMore?: boolean
   selectedId?: string
+  latestMessageStatuses?: Record<string, LatestMessageStatus>
   onSearchChange?: (value: string) => void
   onSelect?: (id: string) => void
   onLoadMore?: () => void
@@ -115,6 +117,7 @@ export function ContactList({
   isSearching,
   hasMore,
   selectedId,
+  latestMessageStatuses = {},
   onSearchChange,
   onSelect,
   onLoadMore,
@@ -364,6 +367,7 @@ export function ContactList({
           filteredChats.map((chat) => {
             const name = getDisplayName(chat)
             const tags = getChatTags(chat).slice(0, 3)
+            const latestStatus = latestMessageStatuses[chat.chat_id]
 
             return (
               <button
@@ -396,8 +400,12 @@ export function ContactList({
                   </div>
 
                   <div className="mt-0.5 flex items-center gap-1">
-                    {chat.last_message_time && chat.text_last_message && (
-                      <CheckCheck className="h-3.5 w-3.5 shrink-0 text-blue-500" />
+                    {chat.text_last_message && (
+                      <MessageStatusIcon
+                        fromMe={chat.last_message_fromMe}
+                        status={latestStatus?.status}
+                        timestamp={latestStatus?.timestamp_msg ?? chat.last_message_time}
+                      />
                     )}
                     <p className="truncate text-sm text-muted-foreground">
                       {chat.text_last_message || "Sem mensagens recentes"}

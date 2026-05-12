@@ -26,6 +26,7 @@ export interface ChatRecord {
   archived: boolean | null
   finalizada: boolean | null
   ia_responde: boolean | null
+  last_message_fromMe: boolean | null
   Status_chat: string | null
   hex_status: string | null
   json_tags: unknown
@@ -54,6 +55,17 @@ export interface MessageRecord {
   public_midia_thumb: string | null
   timestamp_msg: string | null
   status: string | null
+}
+
+export interface LatestMessageStatusRecord {
+  chat_id: string | null
+  status: string | null
+  timestamp_msg: string | null
+}
+
+export interface LatestMessageStatus {
+  status: string | null
+  timestamp_msg: string | null
 }
 
 async function supabaseGet<T>(path: string): Promise<T> {
@@ -100,6 +112,7 @@ export function fetchChats({ limit = 50, offset = 0, search }: ChatQueryOptions 
     "archived",
     "finalizada",
     "ia_responde",
+    "last_message_fromMe",
     "Status_chat",
     "hex_status",
     "json_tags",
@@ -152,4 +165,37 @@ export function fetchMessages(chatId: string, { limit = 50, offset = 0 }: Pagina
   return supabaseGet<MessageRecord[]>(
     `messages?select=${select}&chat_id=eq.${encodeURIComponent(chatId)}&order=timestamp_msg.desc.nullslast&limit=${limit}&offset=${offset}`,
   )
+}
+
+export function fetchLatestMessageStatuses(chatIds: string[]) {
+  const uniqueChatIds = Array.from(new Set(chatIds.filter(Boolean)))
+
+  if (uniqueChatIds.length === 0) {
+    return Promise.resolve({})
+  }
+
+  const select = ["chat_id", "status", "timestamp_msg"].join(",")
+  const encodedIds = uniqueChatIds.map((chatId) => encodeURIComponent(chatId)).join(",")
+  const limit = Math.max(uniqueChatIds.length * 20, 1000)
+
+  return supabaseGet<LatestMessageStatusRecord[]>(
+    `messages?select=${select}&chat_id=in.(${encodedIds})&order=timestamp_msg.desc.nullslast&limit=${limit}`,
+  ).then((messages) => {
+    const initialStatuses = Object.fromEntries(
+      uniqueChatIds.map((chatId) => [chatId, { status: null, timestamp_msg: null }]),
+    )
+    const seenChatIds = new Set<string>()
+
+    return messages.reduce<Record<string, LatestMessageStatus>>((statuses, message) => {
+      if (message.chat_id && !seenChatIds.has(message.chat_id)) {
+        statuses[message.chat_id] = {
+          status: message.status,
+          timestamp_msg: message.timestamp_msg,
+        }
+        seenChatIds.add(message.chat_id)
+      }
+
+      return statuses
+    }, initialStatuses)
+  })
 }
