@@ -1,12 +1,13 @@
 "use client"
 
 import type { UIEvent } from "react"
-import { useMemo, useState } from "react"
-import { Bot, CheckCheck, ChevronDown, Contact, Filter, Flag, Pencil, Search, SlidersHorizontal } from "lucide-react"
+import { useEffect, useMemo, useState } from "react"
+import { Bot, CheckCheck, ChevronDown, ChevronUp, Contact, Filter, FilterX, Pencil, Search, SlidersHorizontal, SquarePlus } from "lucide-react"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { getChatTags, getReadableTextColor } from "@/lib/chat-tags"
 import { cn } from "@/lib/utils"
@@ -25,11 +26,7 @@ interface ContactListProps {
   onLoadMore?: () => void
 }
 
-const filters = [
-  { label: "Todos", value: "all" },
-  { label: "Chats IA", value: "ai" },
-  { label: "Meus Chats", value: "mine" },
-]
+const ALL_FILTERS = "all"
 
 function getDisplayName(chat: ChatRecord) {
   return chat.nome_contato || chat.pushname || chat.chat_id?.replace("@s.whatsapp.net", "") || "Contato sem nome"
@@ -69,6 +66,47 @@ function getStatusLabel(chat: ChatRecord) {
   return chat.finalizada ? "Finalizada" : chat.Status_chat || "Aberta"
 }
 
+function getFilterValues(value: unknown): string[] {
+  if (value === null || value === undefined) return []
+
+  if (typeof value === "string") {
+    const trimmed = value.trim()
+    return trimmed ? [trimmed] : []
+  }
+
+  if (typeof value === "number" || typeof value === "boolean") {
+    return [String(value)]
+  }
+
+  if (Array.isArray(value)) {
+    return value.flatMap(getFilterValues)
+  }
+
+  if (typeof value === "object") {
+    const source = "fields" in value && value.fields && typeof value.fields === "object" ? value.fields : value
+    const record = source as Record<string, unknown>
+    const candidate = record.Nome || record.nome || record.Name || record.name || record.label || record.Setor || record.setor
+
+    return getFilterValues(candidate)
+  }
+
+  return []
+}
+
+function getUniqueOptions(values: unknown[]) {
+  return Array.from(new Set(values.flatMap(getFilterValues))).sort((a, b) =>
+    a.localeCompare(b, "pt-BR", { sensitivity: "base" }),
+  )
+}
+
+function getSectorIds(value: unknown) {
+  return getFilterValues(value).filter((sector) => /^rec[a-zA-Z0-9]+$/.test(sector))
+}
+
+function getSectorLabel(id: string, labels: Record<string, string>) {
+  return labels[id] || id
+}
+
 export function ContactList({
   chats,
   search,
@@ -81,15 +119,106 @@ export function ContactList({
   onSelect,
   onLoadMore,
 }: ContactListProps) {
-  const [activeFilter, setActiveFilter] = useState("all")
+  const [isFiltersOpen, setIsFiltersOpen] = useState(false)
+  const [statusFilter, setStatusFilter] = useState(ALL_FILTERS)
+  const [tagFilter, setTagFilter] = useState(ALL_FILTERS)
+  const [sectorFilter, setSectorFilter] = useState(ALL_FILTERS)
+  const [sectorLabels, setSectorLabels] = useState<Record<string, string>>({})
+  const [sectorCatalog, setSectorCatalog] = useState<string[]>([])
+
+  const statusOptions = useMemo(() => getUniqueOptions(chats.map(getStatusLabel)), [chats])
+  const tagOptions = useMemo(
+    () => getUniqueOptions(chats.flatMap((chat) => getChatTags(chat).map((tag) => tag.label))),
+    [chats],
+  )
+  const sectorIds = useMemo(
+    () => Array.from(new Set(chats.flatMap((chat) => getSectorIds(chat.setor)))),
+    [chats],
+  )
+  const sectorOptions = useMemo(
+    () =>
+      sectorCatalog.length > 0
+        ? sectorCatalog
+        : getUniqueOptions(sectorIds.map((id) => getSectorLabel(id, sectorLabels))),
+    [sectorCatalog, sectorIds, sectorLabels],
+  )
+
+  const hasActiveFilters =
+    statusFilter !== ALL_FILTERS || tagFilter !== ALL_FILTERS || sectorFilter !== ALL_FILTERS
+
+  useEffect(() => {
+    let isMounted = true
+
+    fetch("/api/airtable/sectors")
+      .then((response) => response.json() as Promise<{ labels?: Record<string, string>; sectors?: string[] }>)
+      .then((data) => {
+        if (!isMounted) return
+        setSectorLabels((current) => ({ ...current, ...(data.labels ?? {}) }))
+        setSectorCatalog(data.sectors ?? [])
+      })
+      .catch(() => {
+        if (!isMounted) return
+        setSectorCatalog([])
+      })
+
+    return () => {
+      isMounted = false
+    }
+  }, [])
+
+  useEffect(() => {
+    const missingSectorIds = sectorIds.filter((id) => !sectorLabels[id])
+
+    if (missingSectorIds.length === 0) return
+
+    let isMounted = true
+
+    fetch(`/api/airtable/sectors?ids=${encodeURIComponent(missingSectorIds.join(","))}`)
+      .then((response) => response.json() as Promise<{ labels?: Record<string, string>; sectors?: string[] }>)
+      .then((data) => {
+        if (!isMounted) return
+        setSectorLabels((current) => ({
+          ...current,
+          ...Object.fromEntries(missingSectorIds.map((id) => [id, id])),
+          ...(data.labels ?? {}),
+        }))
+        if (data.sectors?.length) setSectorCatalog(data.sectors)
+      })
+      .catch(() => {
+        if (!isMounted) return
+        setSectorLabels((current) => ({
+          ...current,
+          ...Object.fromEntries(missingSectorIds.map((id) => [id, current[id] || id])),
+        }))
+      })
+
+    return () => {
+      isMounted = false
+    }
+  }, [sectorIds, sectorLabels])
 
   const filteredChats = useMemo(() => {
     return chats.filter((chat) => {
-      if (activeFilter === "ai" && !chat.ia_responde) return false
-      if (activeFilter === "mine" && !chat.dono) return false
+      if (statusFilter !== ALL_FILTERS && getStatusLabel(chat) !== statusFilter) return false
+      if (
+        sectorFilter !== ALL_FILTERS &&
+        !getSectorIds(chat.setor)
+          .map((id) => getSectorLabel(id, sectorLabels))
+          .includes(sectorFilter)
+      ) {
+        return false
+      }
+      if (tagFilter !== ALL_FILTERS && !getChatTags(chat).some((tag) => tag.label === tagFilter)) return false
+
       return true
     })
-  }, [activeFilter, chats])
+  }, [chats, sectorFilter, sectorLabels, statusFilter, tagFilter])
+
+  function clearFilters() {
+    setStatusFilter(ALL_FILTERS)
+    setTagFilter(ALL_FILTERS)
+    setSectorFilter(ALL_FILTERS)
+  }
 
   function handleListScroll(event: UIEvent<HTMLDivElement>) {
     const target = event.currentTarget
@@ -137,35 +266,93 @@ export function ContactList({
               className="h-9 border-0 bg-secondary pl-9 text-sm"
             />
           </div>
-          <Button variant="ghost" size="icon" className="h-9 w-9 text-muted-foreground hover:text-foreground">
-            <Flag className="h-4 w-4" />
+          <Button
+            variant="ghost"
+            size="icon"
+            className={cn("h-9 w-9 text-muted-foreground hover:text-foreground", hasActiveFilters && "text-foreground")}
+            onClick={clearFilters}
+            title="Limpar filtros"
+            aria-label="Limpar filtros"
+          >
+            <FilterX className="h-4 w-4" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-9 w-9 text-muted-foreground hover:text-foreground"
+            title="Novo contato"
+            aria-label="Novo contato"
+          >
+            <SquarePlus className="h-4 w-4" />
           </Button>
         </div>
       </div>
 
-      <div className="border-b border-border px-3 py-2">
-        <button className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
-          <Filter className="h-3.5 w-3.5" />
-          <span>Filtros</span>
-          <ChevronDown className="h-3.5 w-3.5" />
-        </button>
-      </div>
-
-      <div className="flex border-b border-border">
-        {filters.map((filter) => (
+      <div className="border-b border-border bg-muted/80">
+        <div className="flex h-10 items-center justify-between px-3">
           <button
-            key={filter.value}
-            onClick={() => setActiveFilter(filter.value)}
-            className={cn(
-              "flex-1 py-2.5 text-sm font-medium transition-colors",
-              activeFilter === filter.value
-                ? "border-b-2 border-foreground text-foreground"
-                : "text-muted-foreground hover:text-foreground",
-            )}
+            className="text-sm font-semibold text-foreground"
+            onClick={() => setIsFiltersOpen((current) => !current)}
           >
-            {filter.label}
+            Filtros
           </button>
-        ))}
+          <div className="flex items-center gap-3">
+            <Filter className="h-3.5 w-3.5 text-muted-foreground" />
+            <button
+              className="text-muted-foreground hover:text-foreground"
+              onClick={() => setIsFiltersOpen((current) => !current)}
+              aria-label={isFiltersOpen ? "Ocultar filtros" : "Mostrar filtros"}
+            >
+              {isFiltersOpen ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+            </button>
+          </div>
+        </div>
+
+        {isFiltersOpen && (
+          <div className="space-y-2 px-3 pb-4">
+            <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <SelectTrigger className="h-8 w-full bg-card text-xs">
+                <SelectValue placeholder="Status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL_FILTERS}>Status</SelectItem>
+                {statusOptions.map((status) => (
+                  <SelectItem key={status} value={status}>
+                    {status}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Select value={tagFilter} onValueChange={setTagFilter}>
+              <SelectTrigger className="h-8 w-full bg-card text-xs">
+                <SelectValue placeholder="Tags" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL_FILTERS}>Tags</SelectItem>
+                {tagOptions.map((tag) => (
+                  <SelectItem key={tag} value={tag}>
+                    {tag}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Select value={sectorFilter} onValueChange={setSectorFilter}>
+              <SelectTrigger className="h-8 w-full bg-card text-xs">
+                <SelectValue placeholder="Setor" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL_FILTERS}>Setor</SelectItem>
+                {sectorOptions.map((sector) => (
+                  <SelectItem key={sector} value={sector}>
+                    {sector}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
       </div>
 
       <div className="flex-1 overflow-y-auto" onScroll={handleListScroll}>

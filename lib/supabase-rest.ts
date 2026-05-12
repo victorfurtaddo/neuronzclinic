@@ -32,7 +32,7 @@ export interface ChatRecord {
   json_tags_parsed: unknown
   tag_chat_array: unknown
   dono: string | null
-  setor: string | null
+  setor: unknown
   grupo: unknown
   draft: string | null
   lid_id: string | null
