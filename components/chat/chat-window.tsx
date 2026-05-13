@@ -208,7 +208,7 @@ export function ChatWindow({ chat, messages, isLoading, isLoadingOlder, hasMoreM
           </div>
 
           <div className="flex items-center gap-2">
-            <Button onClick={() => onToggleStatus()} className="bg-teal-500 px-4 font-medium text-white hover:bg-teal-600">
+            <Button onClick={() => onToggleStatus()} className="bg-teal-500 px-4 font-medium text-white hover:bg-teal-600 cursor-pointer">
               {chat.finalizada ? "Reabrir" : "Finalizar"}
             </Button>
             <Button onClick={onToggleDetails} variant="ghost" size="icon" className="text-muted-foreground hover:text-foreground cursor-pointer">

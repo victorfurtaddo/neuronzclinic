@@ -5,7 +5,7 @@ import { ContactList } from "@/components/chat/contact-list";
 import { ChatWindow } from "@/components/chat/chat-window";
 import { ChatRecord, MessageRecord, fetchChats, fetchMessages } from "@/lib/supabase-rest";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
-import { ContactDetails } from "@/components/chat/contact-details";
+import { ContactDetails } from "@/components/contact-details/contact-details";
 
 const CHAT_PAGE_SIZE = 50;
 const MESSAGE_PAGE_SIZE = 50;
@@ -211,6 +211,30 @@ export default function ChatsPage() {
     // }
   };
 
+  const handleToggleIA = () => {
+    if (!selectedChatId) return;
+
+    const toggleIAStatus = (list: ChatRecord[]) => list.map((chat) => (chat.id === selectedChatId ? { ...chat, ia_responde: !chat.ia_responde } : chat));
+
+    setChats((current) => toggleIAStatus(current));
+    setSearchChats((current) => toggleIAStatus(current));
+
+    // 3. Persistência de Dados (Comentado)
+    /*
+  const chatToUpdate = chats.find(c => c.id === selectedChatId);
+  if (chatToUpdate) {
+    try {
+      await api.patch(`/chats/${selectedChatId}/config`, { 
+        ia_responde: !chatToUpdate.ia_responde 
+      });
+    } catch (err) {
+      console.error("Erro ao salvar configuração de IA:", err);
+      // Opcional: Reverter o estado local em caso de falha (Rollback)
+    }
+  }
+  */
+  };
+
   return (
     <div className="flex h-screen overflow-hidden bg-background">
       <ContactList
@@ -247,7 +271,7 @@ export default function ChatsPage() {
           <>
             <PanelResizeHandle className="w-1 bg-(--chat-muted)/50 transition-colors hover:bg-(--chat-primary)/50" />
             <Panel defaultSize={30} minSize={26} maxSize={40} className="bg-(--chat-card) border-l border-(--chat-muted)">
-              <ContactDetails chat={selectedChat} onClose={() => setShowDetails(false)} onToggleStatus={handleToggleStatus} />
+              <ContactDetails chat={selectedChat} onClose={() => setShowDetails(false)} onToggleStatus={handleToggleStatus} onToggleIA={handleToggleIA} />
             </Panel>
           </>
         )}
