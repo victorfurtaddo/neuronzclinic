@@ -39,6 +39,78 @@ function getPublicStorageUrl(baseUrl: string, objectPath: string) {
   return `${baseUrl}/storage/v1/object/public/${STORAGE_BUCKET}/${encodedPath}`
 }
 
+function parseQuotedPayload(value: string) {
+  if (!value) return null
+
+  try {
+    const parsed = JSON.parse(value)
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null
+    return parsed
+  } catch {
+    return null
+  }
+}
+
+function getReplyPayload({
+  replyToMessageId,
+  replyToContent,
+  replyToType,
+  replyToFromMe,
+  replyToChatId,
+  replyToParticipant,
+  quoted,
+}: {
+  replyToMessageId: string
+  replyToContent: string
+  replyToType: string
+  replyToFromMe: string
+  replyToChatId: string
+  replyToParticipant: string
+  quoted: Record<string, unknown> | null
+}) {
+  if (!replyToMessageId) return {}
+
+  const quotedPayload =
+    quoted || {
+      key: {
+        id: replyToMessageId,
+        ...(replyToChatId ? { remoteJid: replyToChatId } : {}),
+        fromMe: replyToFromMe === "true",
+        ...(replyToParticipant ? { participant: replyToParticipant } : {}),
+      },
+      message: {
+        conversation: replyToContent || "Mensagem",
+      },
+    }
+
+  return {
+    reply_to: {
+      message_id: replyToMessageId,
+      content: replyToContent,
+      type: replyToType,
+      from_me: replyToFromMe === "true",
+      chat_id: replyToChatId,
+      participant: replyToParticipant,
+    },
+    reply_to_message_id: replyToMessageId,
+    replyToMessageId: replyToMessageId,
+    quoted_message_id: replyToMessageId,
+    quotedMessageId: replyToMessageId,
+    quoted_content: replyToContent,
+    quoted_message_type: replyToType,
+    quoted_from_me: replyToFromMe === "true",
+    quoted_remote_jid: replyToChatId,
+    quoted_participant: replyToParticipant,
+    quoted_key: quotedPayload.key,
+    quoted: quotedPayload,
+    quotedMessage: quotedPayload,
+    quoted_message: quotedPayload,
+    options: {
+      quoted: quotedPayload,
+    },
+  }
+}
+
 async function uploadFile(file: File, chatId: string) {
   const baseUrl = getSupabaseBaseUrl()
 
@@ -82,6 +154,9 @@ export async function POST(request: NextRequest) {
     const replyToContent = String(formData.get("reply_to_content") || "").trim()
     const replyToType = String(formData.get("reply_to_type") || "").trim()
     const replyToFromMe = String(formData.get("reply_to_from_me") || "").trim()
+    const replyToChatId = String(formData.get("reply_to_chat_id") || "").trim()
+    const replyToParticipant = String(formData.get("reply_to_participant") || "").trim()
+    const quoted = parseQuotedPayload(String(formData.get("quoted") || "")) as Record<string, unknown> | null
     const file = formData.get("file")
     const attachment = file instanceof File && file.size > 0 ? file : null
 
@@ -94,16 +169,15 @@ export async function POST(request: NextRequest) {
     }
 
     const uploaded = attachment ? await uploadFile(attachment, chatId) : null
-    const replyPayload = replyToMessageId
-      ? {
-          reply_to: {
-            message_id: replyToMessageId,
-            content: replyToContent,
-            type: replyToType,
-            from_me: replyToFromMe === "true",
-          },
-        }
-      : {}
+    const replyPayload = getReplyPayload({
+      replyToMessageId,
+      replyToContent,
+      replyToType,
+      replyToFromMe,
+      replyToChatId,
+      replyToParticipant,
+      quoted,
+    })
 
     const payload = uploaded
       ? {

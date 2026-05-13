@@ -8,6 +8,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { extractQuotedMessageInfo } from "@/lib/message-replies";
 import { cn } from "@/lib/utils";
 import { ChatRecord, MessageRecord } from "@/lib/supabase-rest";
 import { ContactDetails } from "./contact-details";
@@ -125,15 +126,7 @@ function getMessageJsonField(message: MessageRecord, keys: string[]) {
 }
 
 function getQuotedMessage(message: MessageRecord) {
-  const content = getMessageExtraField(message, ["quoted_content", "quoted_text", "quoted_message", "reply_to_content", "reply_content"]);
-  const messageId = getMessageExtraField(message, ["quoted_message_id", "reply_to_message_id", "quoted_id"]);
-
-  if (!content && !messageId) return null;
-
-  return {
-    content: content || "Mensagem",
-    fromMe: Boolean(message.quoted_from_me ?? (message as MessageRecord & { reply_to_from_me?: boolean }).reply_to_from_me),
-  };
+  return extractQuotedMessageInfo(message);
 }
 
 function getMediaUrl(message: MessageRecord) {
@@ -321,6 +314,14 @@ export function ChatWindow({
 
       return groups;
     }, []);
+  }, [messages]);
+
+  const messagesByRemoteId = useMemo(() => {
+    return messages.reduce<Map<string, MessageRecord>>((indexedMessages, message) => {
+      if (message.message_id) indexedMessages.set(message.message_id, message);
+      indexedMessages.set(message.id, message);
+      return indexedMessages;
+    }, new Map());
   }, [messages]);
 
   const attachmentPreviewUrl = useMemo(() => (attachment ? URL.createObjectURL(attachment) : null), [attachment]);
@@ -712,13 +713,21 @@ export function ChatWindow({
                       const mediaKind = getMediaKind(message);
                       const hasCaption = !!message.content?.trim();
                       const deleted = isDeletedMessage(message);
-                      const quotedMessage = getQuotedMessage(message);
+                      const quotedInfo = getQuotedMessage(message);
+                      const quotedOriginal = quotedInfo?.messageId ? messagesByRemoteId.get(quotedInfo.messageId) : null;
+                      const quotedMessage = quotedOriginal
+                        ? {
+                            content: getMessagePreviewText(quotedOriginal),
+                            fromMe: Boolean(quotedOriginal.from_me),
+                          }
+                        : quotedInfo;
+                      const quotedKind = quotedOriginal ? getMediaKind(quotedOriginal) : null;
 
                       return (
                         <div key={message.id} className={cn("mb-2 flex", fromMe ? "justify-end" : "justify-start")}>
                           <div
                             className={cn(
-                              "group relative max-w-[72%] rounded-lg px-3 py-2 shadow-sm transition-colors",
+                              "group relative min-w-[168px] max-w-[72%] rounded-lg px-3 py-2 shadow-sm transition-colors sm:min-w-[196px]",
                               fromMe ? "rounded-tr-none bg-(--chat-me)" : "rounded-tl-none bg-(--chat-other)",
                               deleted && "border border-dashed border-red-500/45 bg-(--chat-muted)/80 opacity-80 shadow-none saturate-[0.65]",
                             )}
@@ -755,9 +764,25 @@ export function ChatWindow({
 
                             <div className={cn(deleted && "rounded-md bg-(--chat-background)/20 p-2 opacity-70")}>
                               {quotedMessage && (
-                                <div className="mb-2 border-l-2 border-teal-500 bg-(--chat-background)/35 px-2 py-1.5">
-                                  <p className="text-[11px] font-semibold text-teal-600 dark:text-teal-300">{quotedMessage.fromMe ? "Voce" : getDisplayName(chat)}</p>
-                                  <p className="line-clamp-2 text-xs text-(--chat-muted-foreground)">{quotedMessage.content}</p>
+                                <div
+                                  className={cn(
+                                    "mb-2 overflow-hidden rounded-md border-l-4 px-2.5 py-2 shadow-[inset_0_0_0_1px_rgba(17,27,33,0.035)]",
+                                    fromMe ? "bg-[#c8f4c2] dark:bg-[#0f3f2d]" : "bg-[#f5f6f6] dark:bg-[#1d292f]",
+                                    quotedMessage.fromMe ? "border-l-[#00a884]" : "border-l-[#53bdeb]",
+                                  )}
+                                >
+                                  <div className="mb-0.5 flex min-w-0 items-center gap-1.5">
+                                    <p className={cn("truncate text-[12px] font-semibold", quotedMessage.fromMe ? "text-[#008069] dark:text-[#06cf9c]" : "text-[#3b82c4] dark:text-[#53bdeb]")}>
+                                      {quotedMessage.fromMe ? "Voce" : getDisplayName(chat)}
+                                    </p>
+                                  </div>
+                                  <div className="flex min-w-0 items-center gap-1.5 text-(--chat-muted-foreground)">
+                                    {quotedKind === "image" && <FileImage className="h-3.5 w-3.5 shrink-0 opacity-75" />}
+                                    {quotedKind === "video" && <Video className="h-3.5 w-3.5 shrink-0 opacity-75" />}
+                                    {quotedKind === "audio" && <Mic className="h-3.5 w-3.5 shrink-0 opacity-75" />}
+                                    {quotedKind === "file" && <FileText className="h-3.5 w-3.5 shrink-0 opacity-75" />}
+                                    <p className="line-clamp-2 min-w-0 text-[12px] leading-snug">{quotedMessage.content}</p>
+                                  </div>
                                 </div>
                               )}
 
@@ -880,11 +905,17 @@ export function ChatWindow({
           )}
 
           {replyTo && (
-            <div className="mb-2 flex items-center gap-3 rounded-md border-l-4 border-teal-500 bg-secondary px-3 py-2 text-sm">
-              <Reply className="h-4 w-4 shrink-0 text-teal-500" />
+            <div className="mb-2 flex items-center gap-3 overflow-hidden rounded-lg border-l-4 border-[#00a884] bg-[#f0f2f5] px-3 py-2 text-sm shadow-[inset_0_0_0_1px_rgba(17,27,33,0.05)] dark:bg-[#202c33]">
+              <Reply className="h-4 w-4 shrink-0 text-[#00a884]" />
               <div className="min-w-0 flex-1">
-                <p className="text-xs font-semibold text-teal-600 dark:text-teal-300">Respondendo {replyTo.from_me ? "voce" : getDisplayName(chat)}</p>
-                <p className="truncate text-xs text-muted-foreground">{getMessagePreviewText(replyTo)}</p>
+                <p className="truncate text-xs font-semibold text-[#008069] dark:text-[#06cf9c]">Respondendo {replyTo.from_me ? "voce" : getDisplayName(chat)}</p>
+                <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-muted-foreground">
+                  {getMediaKind(replyTo) === "image" && <FileImage className="h-3.5 w-3.5 shrink-0 opacity-75" />}
+                  {getMediaKind(replyTo) === "video" && <Video className="h-3.5 w-3.5 shrink-0 opacity-75" />}
+                  {getMediaKind(replyTo) === "audio" && <Mic className="h-3.5 w-3.5 shrink-0 opacity-75" />}
+                  {getMediaKind(replyTo) === "file" && <FileText className="h-3.5 w-3.5 shrink-0 opacity-75" />}
+                  <p className="truncate text-xs">{getMessagePreviewText(replyTo)}</p>
+                </div>
               </div>
               <Button
                 type="button"

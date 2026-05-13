@@ -26,6 +26,19 @@ function getOptimisticMessageType(file: File | null) {
   return "document"
 }
 
+function getMessagePreviewText(message: MessageRecord) {
+  if (message.content?.trim()) return message.content.trim()
+
+  const type = `${message.media_mime_type || ""} ${message.message_type || ""}`.toLowerCase()
+  if (type.includes("image")) return "Foto"
+  if (type.includes("video")) return "Video"
+  if (type.includes("audio")) return "Audio"
+  if (type.includes("sticker")) return "Figurinha"
+  if (type.includes("document")) return "Documento"
+
+  return "Mensagem"
+}
+
 function isMatchingSentMessage(message: MessageRecord, optimisticMessage: MessageRecord) {
   if (!message.from_me || !message.timestamp_msg || !optimisticMessage.timestamp_msg) return false
 
@@ -245,7 +258,7 @@ export default function ChatsPage() {
         timestamp_msg: timestamp,
         status: "sending",
         quoted_message_id: replyTo.message_id || replyTo.id,
-        quoted_content: replyTo.content || "",
+        quoted_content: getMessagePreviewText(replyTo),
         quoted_from_me: replyTo.from_me,
         quoted_message_type: replyTo.message_type,
       }

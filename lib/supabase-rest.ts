@@ -1,3 +1,5 @@
+import { buildEvolutionQuotedPayload } from "@/lib/message-replies"
+
 const SUPABASE_REST_URL = process.env.NEXT_PUBLIC_SUPABASE_REST_URL
 
 const SUPABASE_PUBLISHABLE_KEY = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
@@ -228,10 +230,18 @@ export async function sendMessage({ chatId, text, file, replyTo }: SendMessageIn
   }
 
   if (replyTo) {
+    const quotedPayload = buildEvolutionQuotedPayload(replyTo)
+
     formData.append("reply_to_message_id", replyTo.message_id || replyTo.id)
     formData.append("reply_to_content", replyTo.content || "")
     formData.append("reply_to_type", replyTo.message_type || "")
     formData.append("reply_to_from_me", String(!!replyTo.from_me))
+    formData.append("reply_to_chat_id", replyTo.chat_id || "")
+    formData.append("reply_to_participant", replyTo.participant || "")
+
+    if (quotedPayload) {
+      formData.append("quoted", JSON.stringify(quotedPayload))
+    }
   }
 
   const response = await fetch("/api/send-message", {
