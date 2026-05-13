@@ -10,6 +10,7 @@ const headers = {
   apikey: SUPABASE_PUBLISHABLE_KEY,
   Authorization: `Bearer ${SUPABASE_PUBLISHABLE_KEY}`,
 }
+const supabaseRestUrl = SUPABASE_REST_URL
 
 export interface ChatRecord {
   id: string
@@ -57,6 +58,12 @@ export interface MessageRecord {
   status: string | null
 }
 
+export interface SendMessageInput {
+  chatId: string
+  text?: string
+  file?: File | null
+}
+
 export interface LatestMessageStatusRecord {
   chat_id: string | null
   status: string | null
@@ -69,7 +76,7 @@ export interface LatestMessageStatus {
 }
 
 async function supabaseGet<T>(path: string): Promise<T> {
-  const url = `${SUPABASE_REST_URL.replace(/\/$/, "")}/${path}`
+  const url = `${supabaseRestUrl.replace(/\/$/, "")}/${path}`
   const response = await fetch(url, {
     headers,
     cache: "no-store",
@@ -198,4 +205,30 @@ export function fetchLatestMessageStatuses(chatIds: string[]) {
       return statuses
     }, initialStatuses)
   })
+}
+
+export async function sendMessage({ chatId, text, file }: SendMessageInput) {
+  const formData = new FormData()
+  formData.append("chat_id", chatId)
+
+  const trimmedText = text?.trim()
+  if (trimmedText) {
+    formData.append("text", trimmedText)
+  }
+
+  if (file) {
+    formData.append("file", file)
+  }
+
+  const response = await fetch("/api/send-message", {
+    method: "POST",
+    body: formData,
+  })
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => null)
+    throw new Error(error?.message || `Nao foi possivel enviar a mensagem (${response.status}).`)
+  }
+
+  return response.json()
 }

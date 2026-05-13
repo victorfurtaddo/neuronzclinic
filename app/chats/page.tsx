@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ContactList } from "@/components/chat/contact-list"
 import { ChatWindow } from "@/components/chat/chat-window"
 import {
@@ -10,10 +10,35 @@ import {
   fetchChats,
   fetchLatestMessageStatuses,
   fetchMessages,
+  sendMessage,
 } from "@/lib/supabase-rest"
 
 const CHAT_PAGE_SIZE = 50
 const MESSAGE_PAGE_SIZE = 50
+
+function getOptimisticMessageType(file: File | null) {
+  if (!file) return "text"
+  if (file.type.startsWith("audio/")) return "audio"
+  if (file.type.startsWith("image/")) return "image"
+  if (file.type.startsWith("video/")) return "video"
+  return "document"
+}
+
+function isMatchingSentMessage(message: MessageRecord, optimisticMessage: MessageRecord) {
+  if (!message.from_me || !message.timestamp_msg || !optimisticMessage.timestamp_msg) return false
+
+  const messageTime = new Date(message.timestamp_msg).getTime()
+  const optimisticTime = new Date(optimisticMessage.timestamp_msg).getTime()
+  const isNearOptimisticTime = messageTime >= optimisticTime - 10000
+
+  if (!isNearOptimisticTime) return false
+
+  if (optimisticMessage.media_url || optimisticMessage.public_media_url) {
+    return message.message_type === optimisticMessage.message_type || !!message.media_url || !!message.public_media_url
+  }
+
+  return message.content?.trim() === optimisticMessage.content?.trim()
+}
 
 export default function ChatsPage() {
   const [chats, setChats] = useState<ChatRecord[]>([])
@@ -42,6 +67,11 @@ export default function ChatsPage() {
     [selectedChatId, visibleChats],
   )
   const selectedChatRemoteId = selectedChat?.chat_id
+  const selectedChatRemoteIdRef = useRef<string | undefined>(undefined)
+
+  useEffect(() => {
+    selectedChatRemoteIdRef.current = selectedChatRemoteId
+  }, [selectedChatRemoteId])
 
   const loadMoreChats = useCallback(async () => {
     if (isSearching) {
@@ -122,6 +152,73 @@ export default function ChatsPage() {
       setIsLoadingOlderMessages(false)
     }
   }, [hasMoreMessages, isLoadingOlderMessages, messages, selectedChatRemoteId])
+
+  const refreshMessagesAfterSend = useCallback(
+    async (chatId: string, optimisticId: string) => {
+      const data = await fetchMessages(chatId, { limit: MESSAGE_PAGE_SIZE, offset: 0 })
+      const freshMessages = [...data].reverse()
+
+      if (selectedChatRemoteIdRef.current !== chatId) return
+
+      setMessages((current) => {
+        const optimisticMessage = current.find((message) => message.id === optimisticId)
+        if (!optimisticMessage) return freshMessages
+
+        const hasRealMessage = freshMessages.some((message) => isMatchingSentMessage(message, optimisticMessage))
+        return hasRealMessage ? freshMessages : [...freshMessages, { ...optimisticMessage, status: "sent" }]
+      })
+      setMessagesChatId(chatId)
+      setHasMoreMessages(data.length === MESSAGE_PAGE_SIZE)
+    },
+    [],
+  )
+
+  const handleSendMessage = useCallback(
+    async ({ text, file }: { text: string; file: File | null }) => {
+      if (!selectedChatRemoteId) return
+
+      const timestamp = new Date().toISOString()
+      const optimisticId = `optimistic-${crypto.randomUUID()}`
+      const localMediaUrl = file ? URL.createObjectURL(file) : null
+      const optimisticMessage: MessageRecord = {
+        id: optimisticId,
+        message_id: optimisticId,
+        from_me: true,
+        chat_id: selectedChatRemoteId,
+        participant: null,
+        message_type: getOptimisticMessageType(file),
+        content: text || (file ? file.name : ""),
+        media_url: null,
+        media_path: null,
+        media_mime_type: file?.type || null,
+        public_media_url: localMediaUrl,
+        public_midia_thumb: null,
+        timestamp_msg: timestamp,
+        status: "sending",
+      }
+
+      setMessages((current) => [...current, optimisticMessage])
+      setError(undefined)
+
+      try {
+        await sendMessage({ chatId: selectedChatRemoteId, text, file })
+        await refreshMessagesAfterSend(selectedChatRemoteId, optimisticId)
+        window.setTimeout(() => void refreshMessagesAfterSend(selectedChatRemoteId, optimisticId), 2500)
+        window.setTimeout(() => void refreshMessagesAfterSend(selectedChatRemoteId, optimisticId), 7000)
+      } catch (err) {
+        setMessages((current) =>
+          current.map((message) => (message.id === optimisticId ? { ...message, status: "error" } : message)),
+        )
+        setError(err instanceof Error ? err.message : "Nao foi possivel enviar a mensagem.")
+        throw err
+      } finally {
+        if (localMediaUrl) {
+          window.setTimeout(() => URL.revokeObjectURL(localMediaUrl), 60000)
+        }
+      }
+    },
+    [refreshMessagesAfterSend, selectedChatRemoteId],
+  )
 
   useEffect(() => {
     let isMounted = true
@@ -257,6 +354,7 @@ export default function ChatsPage() {
         hasMoreMessages={!!selectedChatRemoteId && hasMoreMessages}
         onLoadOlderMessages={loadOlderMessages}
         onCloseChat={() => setSelectedChatId(undefined)}
+        onSendMessage={handleSendMessage}
         error={error}
       />
     </div>

@@ -1,16 +1,22 @@
 "use client";
 
 import Image from "next/image";
-import type { UIEvent } from "react";
+import type { FormEvent, UIEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Download, FileText, Mic, MoreHorizontal, Paperclip, Pause, PenLine, PlayIcon, Send } from "lucide-react";
+import { Camera, Download, FileImage, FileText, MapPin, Mic, MoreHorizontal, Paperclip, Pause, PenLine, PlayIcon, Send, UserRound, Video, X } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { ChatRecord, MessageRecord } from "@/lib/supabase-rest";
 import { ContactDetails } from "./contact-details";
 import { MessageStatusIcon } from "./message-status-icon";
+
+type AttachmentPreviewKind = "image" | "video" | "audio" | "document";
+
+const attachmentMenuItemClass = "flex h-[76px] cursor-pointer flex-col items-center justify-center gap-2 rounded-md p-2 text-xs font-medium text-foreground transition-colors focus:bg-muted";
+const disabledAttachmentMenuItemClass = "flex h-[76px] cursor-not-allowed flex-col items-center justify-center gap-2 rounded-md p-2 text-xs font-medium text-muted-foreground focus:bg-transparent";
 
 interface ChatWindowProps {
   chat?: ChatRecord;
@@ -20,6 +26,7 @@ interface ChatWindowProps {
   hasMoreMessages?: boolean;
   onLoadOlderMessages?: () => Promise<number>;
   onCloseChat?: () => void;
+  onSendMessage?: (input: { text: string; file: File | null }) => Promise<void>;
   error?: string;
 }
 
@@ -81,11 +88,37 @@ function getFileName(message: MessageRecord, mediaUrl: string) {
   return name ? decodeURIComponent(name) : message.media_mime_type || message.message_type || "Arquivo";
 }
 
-export function ChatWindow({ chat, messages, isLoading, isLoadingOlder, hasMoreMessages, onLoadOlderMessages, onCloseChat, error }: ChatWindowProps) {
+function getAttachmentType(file: File | null) {
+  if (!file) return null;
+  if (file.type.startsWith("image/")) return "image";
+  if (file.type.startsWith("video/")) return "video";
+  if (file.type.startsWith("audio/")) return "audio";
+  return "document";
+}
+
+function getAttachmentLabel(file: File) {
+  const kind = getAttachmentType(file);
+
+  if (kind === "image") return "Foto";
+  if (kind === "video") return "Video";
+  if (kind === "audio") return "Audio";
+  return "Documento";
+}
+
+export function ChatWindow({ chat, messages, isLoading, isLoadingOlder, hasMoreMessages, onLoadOlderMessages, onCloseChat, onSendMessage, error }: ChatWindowProps) {
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [attachment, setAttachment] = useState<File | null>(null);
+  const [isAttachmentPreviewOpen, setIsAttachmentPreviewOpen] = useState(false);
+  const [expandedImage, setExpandedImage] = useState<{ url: string; alt: string } | null>(null);
+  const [isSending, setIsSending] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const previousScrollHeightRef = useRef<number | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const photoInputRef = useRef<HTMLInputElement>(null);
+  const videoInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
 
   //audio
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -147,6 +180,14 @@ export function ChatWindow({ chat, messages, isLoading, isLoadingOlder, hasMoreM
     }, []);
   }, [messages]);
 
+  const attachmentPreviewUrl = useMemo(() => (attachment ? URL.createObjectURL(attachment) : null), [attachment]);
+
+  useEffect(() => {
+    return () => {
+      if (attachmentPreviewUrl) URL.revokeObjectURL(attachmentPreviewUrl);
+    };
+  }, [attachmentPreviewUrl]);
+
   useEffect(() => {
     const scrollArea = scrollAreaRef.current;
     const previousScrollHeight = previousScrollHeightRef.current;
@@ -187,9 +228,48 @@ export function ChatWindow({ chat, messages, isLoading, isLoadingOlder, hasMoreM
     }
   }
 
+  async function handleSubmit(event?: FormEvent<HTMLFormElement>) {
+    event?.preventDefault();
+
+    if (!onSendMessage || isSending) return;
+
+    const text = draft.trim();
+    if (!text && !attachment) return;
+
+    setIsSending(true);
+
+    try {
+      await onSendMessage({ text, file: attachment });
+      setDraft("");
+      removeAttachment();
+    } finally {
+      setIsSending(false);
+    }
+  }
+
+  function handleAttachmentSelected(file?: File | null) {
+    const selectedFile = file ?? null;
+    setAttachment(selectedFile);
+    setIsAttachmentPreviewOpen(!!selectedFile);
+  }
+
+  function removeAttachment() {
+    setAttachment(null);
+    setIsAttachmentPreviewOpen(false);
+    clearAttachmentInputs();
+  }
+
+  function clearAttachmentInputs() {
+    for (const input of [fileInputRef.current, photoInputRef.current, videoInputRef.current, cameraInputRef.current]) {
+      if (input) input.value = "";
+    }
+  }
+
   if (!chat) {
     return <div className="flex flex-1 items-center justify-center bg-background px-6 text-center text-sm text-muted-foreground">Selecione um contato para visualizar a conversa.</div>;
   }
+
+  const attachmentKind = getAttachmentType(attachment) as AttachmentPreviewKind | null;
 
   return (
     <div className="flex h-full flex-1 overflow-hidden bg-background">
@@ -276,9 +356,14 @@ export function ChatWindow({ chat, messages, isLoading, isLoadingOlder, hasMoreM
                             {mediaUrl ? (
                               <div className="flex max-w-full flex-col gap-2">
                                 {mediaKind === "image" && (
-                                  <a href={mediaUrl} target="_blank" rel="noreferrer" className="block">
-                                    <Image src={mediaUrl} alt={message.content || "Imagem"} width={520} height={420} className="h-auto max-h-[420px] w-auto max-w-full rounded-md object-contain" loading="lazy" unoptimized />
-                                  </a>
+                                  <button
+                                    type="button"
+                                    onClick={() => setExpandedImage({ url: mediaUrl, alt: message.content || "Imagem" })}
+                                    className="relative block aspect-[4/3] w-[min(320px,64vw)] max-w-full overflow-hidden rounded-md bg-(--chat-background)/40"
+                                    aria-label="Expandir imagem"
+                                  >
+                                    <Image src={mediaUrl} alt={message.content || "Imagem"} fill sizes="(max-width: 640px) 64vw, 320px" className="object-contain" loading="lazy" unoptimized />
+                                  </button>
                                 )}
 
                                 {mediaKind === "sticker" && (
@@ -287,7 +372,11 @@ export function ChatWindow({ chat, messages, isLoading, isLoadingOlder, hasMoreM
                                   </div>
                                 )}
 
-                                {mediaKind === "video" && <video src={mediaUrl} className="max-h-[420px] w-full max-w-[520px] rounded-md bg-black" controls preload="metadata" />}
+                                {mediaKind === "video" && (
+                                  <div className="aspect-video w-[min(320px,64vw)] max-w-full overflow-hidden rounded-md bg-black">
+                                    <video src={mediaUrl} className="h-full w-full object-contain" controls preload="metadata" />
+                                  </div>
+                                )}
 
                                 {mediaKind === "audio" && (
                                   <div className="flex items-end gap-3 bg-(--chat-background)/40 p-2 rounded-xl min-w-[260px]">
@@ -359,7 +448,28 @@ export function ChatWindow({ chat, messages, isLoading, isLoadingOlder, hasMoreM
           </div>
         </div>
 
-        <div className="border-t border-border bg-card px-4 py-3">
+        <form onSubmit={handleSubmit} className="border-t border-border bg-card px-4 py-3">
+          {attachment && (
+            <div className="mb-2 flex items-center justify-between rounded-md border border-border bg-secondary px-3 py-2 text-sm">
+              <button type="button" className="min-w-0 text-left" onClick={() => setIsAttachmentPreviewOpen(true)}>
+                <p className="truncate font-medium text-foreground">{attachment.name}</p>
+                <p className="text-xs text-muted-foreground">
+                  {getAttachmentLabel(attachment)} · {(attachment.size / 1024 / 1024).toFixed(2)} MB
+                </p>
+              </button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                className="shrink-0 text-muted-foreground hover:text-foreground"
+                onClick={removeAttachment}
+                aria-label="Remover anexo"
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+          )}
+
           <div className="flex items-center gap-3">
             <Button variant="ghost" size="icon" className="shrink-0 text-muted-foreground hover:text-foreground">
               <PenLine className="h-5 w-5" />
@@ -367,16 +477,211 @@ export function ChatWindow({ chat, messages, isLoading, isLoadingOlder, hasMoreM
             <Button variant="ghost" size="icon" className="shrink-0 text-muted-foreground hover:text-foreground">
               <Mic className="h-5 w-5" />
             </Button>
-            <Button variant="ghost" size="icon" className="shrink-0 text-muted-foreground hover:text-foreground">
-              <Paperclip className="h-5 w-5" />
-            </Button>
-            <Input disabled placeholder="Envio desativado neste painel de leitura" className="flex-1 border-0 bg-secondary" />
-            <Button disabled size="icon" className="shrink-0 rounded-full bg-teal-500 text-white hover:bg-teal-600">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip,.rar,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              className="hidden"
+              onChange={(event) => handleAttachmentSelected(event.target.files?.[0])}
+            />
+            <input ref={photoInputRef} type="file" accept="image/*" className="hidden" onChange={(event) => handleAttachmentSelected(event.target.files?.[0])} />
+            <input ref={videoInputRef} type="file" accept="video/*" className="hidden" onChange={(event) => handleAttachmentSelected(event.target.files?.[0])} />
+            <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={(event) => handleAttachmentSelected(event.target.files?.[0])} />
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button type="button" variant="ghost" size="icon" className="shrink-0 text-muted-foreground hover:text-foreground" aria-label="Anexar arquivo">
+                  <Paperclip className="h-5 w-5" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" side="top" sideOffset={12} className="w-[300px] rounded-lg border-border bg-card p-3 shadow-xl">
+                <div className="grid grid-cols-3 gap-2">
+                  <DropdownMenuItem
+                    className={attachmentMenuItemClass}
+                    onSelect={() => photoInputRef.current?.click()}
+                  >
+                    <span className="flex h-9 w-9 items-center justify-center rounded-full bg-blue-500 text-black shadow-sm ring-1 ring-black/10 dark:text-white dark:ring-white/15">
+                      <FileImage className="h-5 w-5 text-current" />
+                    </span>
+                    Fotos
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    className={attachmentMenuItemClass}
+                    onSelect={() => videoInputRef.current?.click()}
+                  >
+                    <span className="flex h-9 w-9 items-center justify-center rounded-full bg-rose-600 text-black shadow-sm ring-1 ring-black/10 dark:text-white dark:ring-white/15">
+                      <Video className="h-5 w-5 text-current" />
+                    </span>
+                    Videos
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    className={attachmentMenuItemClass}
+                    onSelect={() => fileInputRef.current?.click()}
+                  >
+                    <span className="flex h-9 w-9 items-center justify-center rounded-full bg-violet-600 text-black shadow-sm ring-1 ring-black/10 dark:text-white dark:ring-white/15">
+                      <FileText className="h-5 w-5 text-current" />
+                    </span>
+                    Documentos
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    className={attachmentMenuItemClass}
+                    onSelect={() => cameraInputRef.current?.click()}
+                  >
+                    <span className="flex h-9 w-9 items-center justify-center rounded-full bg-orange-600 text-black shadow-sm ring-1 ring-black/10 dark:text-white dark:ring-white/15">
+                      <Camera className="h-5 w-5 text-current" />
+                    </span>
+                    Camera
+                  </DropdownMenuItem>
+                  <DropdownMenuItem aria-disabled className={disabledAttachmentMenuItemClass} onSelect={(event) => event.preventDefault()}>
+                    <span className="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-600 text-black shadow-sm ring-1 ring-black/10 dark:text-white dark:ring-white/15">
+                      <MapPin className="h-5 w-5 text-current" />
+                    </span>
+                    Localizacao
+                  </DropdownMenuItem>
+                  <DropdownMenuItem aria-disabled className={disabledAttachmentMenuItemClass} onSelect={(event) => event.preventDefault()}>
+                    <span className="flex h-9 w-9 items-center justify-center rounded-full bg-amber-600 text-black shadow-sm ring-1 ring-black/10 dark:text-white dark:ring-white/15">
+                      <UserRound className="h-5 w-5 text-current" />
+                    </span>
+                    Contato
+                  </DropdownMenuItem>
+                </div>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <Input
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              disabled={isSending}
+              placeholder={attachment ? "Legenda opcional" : "Digite uma mensagem"}
+              className="flex-1 border-0 bg-secondary"
+            />
+            <Button
+              type="submit"
+              disabled={isSending || (!draft.trim() && !attachment)}
+              size="icon"
+              className="shrink-0 rounded-full bg-teal-500 text-white hover:bg-teal-600"
+              aria-label="Enviar mensagem"
+            >
               <Send className="h-5 w-5" />
             </Button>
           </div>
-        </div>
+        </form>
       </div>
+
+      {attachment && isAttachmentPreviewOpen && (
+        <div className="fixed inset-0 z-50 flex flex-col bg-background/95 backdrop-blur-sm">
+          <div className="flex h-16 items-center justify-between border-b border-border bg-card px-4">
+            <div className="min-w-0">
+              <p className="truncate text-sm font-medium text-foreground">{attachment.name}</p>
+              <p className="text-xs text-muted-foreground">
+                {getAttachmentLabel(attachment)} · {(attachment.size / 1024 / 1024).toFixed(2)} MB
+              </p>
+            </div>
+            <Button type="button" variant="ghost" size="icon" onClick={removeAttachment} aria-label="Fechar preview">
+              <X className="h-5 w-5" />
+            </Button>
+          </div>
+
+          <div className="flex min-h-0 flex-1 items-center justify-center bg-black/5 p-4 sm:p-8">
+            {attachmentPreviewUrl && attachmentKind === "image" && (
+              <Image
+                src={attachmentPreviewUrl}
+                alt={attachment.name}
+                width={1200}
+                height={900}
+                className="max-h-full w-auto max-w-full rounded-md object-contain shadow-2xl"
+                unoptimized
+              />
+            )}
+
+            {attachmentPreviewUrl && attachmentKind === "video" && (
+              <video src={attachmentPreviewUrl} className="max-h-full w-auto max-w-full rounded-md bg-black shadow-2xl" controls preload="metadata" />
+            )}
+
+            {attachmentPreviewUrl && attachmentKind === "audio" && (
+              <div className="flex w-full max-w-xl flex-col items-center gap-5 rounded-lg border border-border bg-card p-8 shadow-2xl">
+                <span className="flex h-20 w-20 items-center justify-center rounded-full bg-teal-500 text-white">
+                  <Mic className="h-10 w-10" />
+                </span>
+                <div className="min-w-0 text-center">
+                  <p className="truncate text-base font-medium text-foreground">{attachment.name}</p>
+                  <p className="text-sm text-muted-foreground">{attachment.type || "audio"}</p>
+                </div>
+                <audio src={attachmentPreviewUrl} className="w-full" controls />
+              </div>
+            )}
+
+            {attachmentKind === "document" && (
+              <div className="flex w-full max-w-md flex-col items-center gap-4 rounded-lg border border-border bg-card p-8 text-center shadow-2xl">
+                <span className="flex h-20 w-20 items-center justify-center rounded-full bg-purple-600 text-white">
+                  <FileText className="h-10 w-10" />
+                </span>
+                <div className="min-w-0">
+                  <p className="break-words text-base font-medium text-foreground">{attachment.name}</p>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {attachment.type || "Arquivo"} · {(attachment.size / 1024 / 1024).toFixed(2)} MB
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <form onSubmit={handleSubmit} className="border-t border-border bg-card p-4">
+            <div className="mx-auto flex w-full max-w-4xl items-center gap-3">
+              <Input
+                value={draft}
+                onChange={(event) => setDraft(event.target.value)}
+                disabled={isSending}
+                placeholder="Adicione uma legenda"
+                className="h-11 flex-1 border-0 bg-secondary"
+              />
+              <Button
+                type="submit"
+                disabled={isSending}
+                size="icon-lg"
+                className="shrink-0 rounded-full bg-teal-500 text-white hover:bg-teal-600"
+                aria-label="Enviar anexo"
+              >
+                <Send className="h-5 w-5" />
+              </Button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {expandedImage && (
+        <div className="fixed inset-0 z-50 flex flex-col bg-black/85 backdrop-blur-sm">
+          <div className="flex h-14 items-center justify-end px-4">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              onClick={() => setExpandedImage(null)}
+              className="text-white hover:bg-white/10 hover:text-white"
+              aria-label="Fechar imagem"
+            >
+              <X className="h-5 w-5" />
+            </Button>
+          </div>
+
+          <button
+            type="button"
+            className="flex min-h-0 flex-1 items-center justify-center px-4 pb-6"
+            onClick={() => setExpandedImage(null)}
+            aria-label="Fechar imagem expandida"
+          >
+            <span className="relative block h-full max-h-full w-full max-w-6xl">
+              <Image
+                src={expandedImage.url}
+                alt={expandedImage.alt}
+                fill
+                sizes="100vw"
+                className="object-contain"
+                priority
+                unoptimized
+              />
+            </span>
+          </button>
+        </div>
+      )}
 
       {isDetailsOpen && <ContactDetails chat={chat} onClose={() => setIsDetailsOpen(false)} />}
     </div>
