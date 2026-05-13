@@ -1,9 +1,9 @@
 "use client";
 
 import Image from "next/image";
-import type { FormEvent, UIEvent } from "react";
+import type { FormEvent, MouseEvent, UIEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Camera, Download, FileImage, FileText, MapPin, Mic, MoreHorizontal, Paperclip, Pause, PenLine, PlayIcon, Send, UserRound, Video, X } from "lucide-react";
+import { Camera, Download, FileImage, FileText, MapPin, Mic, MoreHorizontal, Paperclip, Pause, PenLine, PlayIcon, Send, Trash2, UserRound, Video, X } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -105,6 +105,19 @@ function getAttachmentLabel(file: File) {
   return "Documento";
 }
 
+function getSupportedAudioMimeType() {
+  if (typeof MediaRecorder === "undefined") return "";
+
+  const mimeTypes = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"];
+  return mimeTypes.find((mimeType) => MediaRecorder.isTypeSupported(mimeType)) || "";
+}
+
+function getAudioFileExtension(mimeType: string) {
+  if (mimeType.includes("mp4")) return "m4a";
+  if (mimeType.includes("ogg")) return "ogg";
+  return "webm";
+}
+
 export function ChatWindow({ chat, messages, isLoading, isLoadingOlder, hasMoreMessages, onLoadOlderMessages, onCloseChat, onSendMessage, error }: ChatWindowProps) {
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
   const [draft, setDraft] = useState("");
@@ -112,6 +125,10 @@ export function ChatWindow({ chat, messages, isLoading, isLoadingOlder, hasMoreM
   const [isAttachmentPreviewOpen, setIsAttachmentPreviewOpen] = useState(false);
   const [expandedImage, setExpandedImage] = useState<{ url: string; alt: string } | null>(null);
   const [isSending, setIsSending] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const [isRecordingPaused, setIsRecordingPaused] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const [recordingError, setRecordingError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const previousScrollHeightRef = useRef<number | null>(null);
@@ -119,6 +136,12 @@ export function ChatWindow({ chat, messages, isLoading, isLoadingOlder, hasMoreM
   const photoInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordingChunksRef = useRef<BlobPart[]>([]);
+  const recordingStreamRef = useRef<MediaStream | null>(null);
+  const recordingTimerRef = useRef<number | null>(null);
+  const shouldSendRecordingRef = useRef(false);
+  const recordingPausedRef = useRef(false);
 
   //audio
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -154,7 +177,7 @@ export function ChatWindow({ chat, messages, isLoading, isLoadingOlder, hasMoreM
     return `${minutes}:${seconds.toString().padStart(2, "0")}`;
   };
 
-  const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
+  const handleSeek = (e: MouseEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const percentage = x / rect.width;
@@ -216,6 +239,24 @@ export function ChatWindow({ chat, messages, isLoading, isLoadingOlder, hasMoreM
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [chat, onCloseChat]);
 
+  useEffect(() => {
+    return () => {
+      shouldSendRecordingRef.current = false;
+
+      const recorder = mediaRecorderRef.current;
+      if (recorder && recorder.state !== "inactive") {
+        recorder.stop();
+      } else {
+        if (recordingTimerRef.current) {
+          window.clearInterval(recordingTimerRef.current);
+          recordingTimerRef.current = null;
+        }
+        recordingStreamRef.current?.getTracks().forEach((track) => track.stop());
+        recordingStreamRef.current = null;
+      }
+    };
+  }, [chat?.id]);
+
   async function handleMessagesScroll(event: UIEvent<HTMLDivElement>) {
     if (!onLoadOlderMessages || !hasMoreMessages || isLoadingOlder || isLoading) return;
     if (event.currentTarget.scrollTop > 120) return;
@@ -262,6 +303,151 @@ export function ChatWindow({ chat, messages, isLoading, isLoadingOlder, hasMoreM
   function clearAttachmentInputs() {
     for (const input of [fileInputRef.current, photoInputRef.current, videoInputRef.current, cameraInputRef.current]) {
       if (input) input.value = "";
+    }
+  }
+
+  function clearRecordingTimer() {
+    if (recordingTimerRef.current) {
+      window.clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
+  }
+
+  function stopRecordingStream() {
+    recordingStreamRef.current?.getTracks().forEach((track) => track.stop());
+    recordingStreamRef.current = null;
+  }
+
+  async function startRecording() {
+    if (!onSendMessage || isSending || isRecording) return;
+
+    setRecordingError(null);
+
+    if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+      setRecordingError("Seu navegador nao oferece suporte a gravacao de audio.");
+      return;
+    }
+
+    try {
+      removeAttachment();
+
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mimeType = getSupportedAudioMimeType();
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+
+      recordingChunksRef.current = [];
+      recordingStreamRef.current = stream;
+      mediaRecorderRef.current = recorder;
+      shouldSendRecordingRef.current = false;
+      recordingPausedRef.current = false;
+
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          recordingChunksRef.current.push(event.data);
+        }
+      };
+
+      recorder.onstop = async () => {
+        clearRecordingTimer();
+        stopRecordingStream();
+
+        const chunks = recordingChunksRef.current;
+        recordingChunksRef.current = [];
+        mediaRecorderRef.current = null;
+        recordingPausedRef.current = false;
+        setIsRecording(false);
+        setIsRecordingPaused(false);
+        setRecordingSeconds(0);
+
+        if (!shouldSendRecordingRef.current || chunks.length === 0) {
+          shouldSendRecordingRef.current = false;
+          return;
+        }
+
+        shouldSendRecordingRef.current = false;
+        const recordedMimeType = recorder.mimeType || mimeType || "audio/webm";
+        const blob = new Blob(chunks, { type: recordedMimeType });
+        const file = new File([blob], `audio-${Date.now()}.${getAudioFileExtension(recordedMimeType)}`, {
+          type: recordedMimeType,
+        });
+
+        setIsSending(true);
+        try {
+          await onSendMessage({ text: "", file });
+        } catch (error) {
+          setRecordingError(error instanceof Error ? error.message : "Nao foi possivel enviar o audio gravado.");
+        } finally {
+          setIsSending(false);
+        }
+      };
+
+      recorder.onerror = () => {
+        setRecordingError("Nao foi possivel concluir a gravacao.");
+        shouldSendRecordingRef.current = false;
+        stopRecording();
+      };
+
+      recorder.start();
+      setIsRecording(true);
+      setIsRecordingPaused(false);
+      setRecordingSeconds(0);
+      clearRecordingTimer();
+      recordingTimerRef.current = window.setInterval(() => {
+        if (!recordingPausedRef.current) {
+          setRecordingSeconds((seconds) => seconds + 1);
+        }
+      }, 1000);
+    } catch {
+      clearRecordingTimer();
+      stopRecordingStream();
+      setIsRecording(false);
+      setIsRecordingPaused(false);
+      setRecordingError("Permita o acesso ao microfone para gravar audio.");
+    }
+  }
+
+  function stopRecording() {
+    const recorder = mediaRecorderRef.current;
+
+    if (recorder && recorder.state !== "inactive") {
+      recorder.stop();
+      return;
+    }
+
+    clearRecordingTimer();
+    stopRecordingStream();
+    setIsRecording(false);
+    setIsRecordingPaused(false);
+    setRecordingSeconds(0);
+  }
+
+  function sendRecording() {
+    if (!isRecording || isSending) return;
+
+    shouldSendRecordingRef.current = true;
+    stopRecording();
+  }
+
+  function cancelRecording() {
+    shouldSendRecordingRef.current = false;
+    stopRecording();
+  }
+
+  function toggleRecordingPause() {
+    const recorder = mediaRecorderRef.current;
+    if (!recorder) return;
+
+    if (recorder.state === "recording") {
+      recorder.pause();
+      recordingPausedRef.current = true;
+      setIsRecordingPaused(true);
+      return;
+    }
+
+    if (recorder.state === "paused") {
+      recorder.resume();
+      recordingPausedRef.current = false;
+      setIsRecordingPaused(false);
     }
   }
 
@@ -470,13 +656,84 @@ export function ChatWindow({ chat, messages, isLoading, isLoadingOlder, hasMoreM
             </div>
           )}
 
+          {recordingError && <p className="mb-2 rounded-md bg-red-500/10 px-3 py-2 text-xs text-red-500">{recordingError}</p>}
+
           <div className="flex items-center gap-3">
-            <Button variant="ghost" size="icon" className="shrink-0 text-muted-foreground hover:text-foreground">
-              <PenLine className="h-5 w-5" />
-            </Button>
-            <Button variant="ghost" size="icon" className="shrink-0 text-muted-foreground hover:text-foreground">
-              <Mic className="h-5 w-5" />
-            </Button>
+            {isRecording ? (
+              <div className="flex min-w-0 flex-1 items-center gap-3 rounded-full bg-secondary px-2 py-2 shadow-sm">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="shrink-0 rounded-full text-muted-foreground hover:text-red-500"
+                  onClick={cancelRecording}
+                  disabled={isSending}
+                  aria-label="Cancelar gravacao"
+                >
+                  <Trash2 className="h-5 w-5" />
+                </Button>
+
+                <span className={cn("h-2.5 w-2.5 shrink-0 rounded-full bg-rose-400", isRecordingPaused ? "opacity-40" : "animate-pulse")} />
+                <span className="w-12 shrink-0 text-sm font-semibold tabular-nums text-foreground">{formatTime(recordingSeconds)}</span>
+
+                <div className="flex min-w-0 flex-1 items-center justify-center gap-1 overflow-hidden px-2" aria-hidden="true">
+                  {Array.from({ length: 26 }).map((_, index) => {
+                    const height = 6 + ((index * 7 + recordingSeconds * 5) % 18);
+
+                    return (
+                      <span
+                        key={index}
+                        className={cn("w-1 rounded-full bg-muted-foreground/60 transition-all duration-300", !isRecordingPaused && "animate-pulse")}
+                        style={{
+                          height,
+                          animationDelay: `${index * 45}ms`,
+                        }}
+                      />
+                    );
+                  })}
+                </div>
+
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="shrink-0 rounded-full text-rose-400 hover:bg-rose-400/10 hover:text-rose-400"
+                  onClick={toggleRecordingPause}
+                  disabled={isSending}
+                  aria-label={isRecordingPaused ? "Retomar gravacao" : "Pausar gravacao"}
+                >
+                  {isRecordingPaused ? <Mic className="h-5 w-5" /> : <Pause className="h-5 w-5" />}
+                </Button>
+
+                <Button
+                  type="button"
+                  disabled={isSending}
+                  size="icon"
+                  className="shrink-0 rounded-full bg-teal-500 text-white hover:bg-teal-600"
+                  onClick={sendRecording}
+                  aria-label="Enviar audio gravado"
+                >
+                  <Send className="h-5 w-5" />
+                </Button>
+              </div>
+            ) : (
+              <>
+                <Button type="button" variant="ghost" size="icon" className="shrink-0 text-muted-foreground hover:text-foreground">
+                  <PenLine className="h-5 w-5" />
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="shrink-0 text-muted-foreground hover:text-foreground"
+                  onClick={startRecording}
+                  disabled={isSending || !!attachment}
+                  aria-label="Gravar audio"
+                >
+                  <Mic className="h-5 w-5" />
+                </Button>
+              </>
+            )}
             <input
               ref={fileInputRef}
               type="file"
@@ -487,81 +744,85 @@ export function ChatWindow({ chat, messages, isLoading, isLoadingOlder, hasMoreM
             <input ref={photoInputRef} type="file" accept="image/*" className="hidden" onChange={(event) => handleAttachmentSelected(event.target.files?.[0])} />
             <input ref={videoInputRef} type="file" accept="video/*" className="hidden" onChange={(event) => handleAttachmentSelected(event.target.files?.[0])} />
             <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={(event) => handleAttachmentSelected(event.target.files?.[0])} />
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button type="button" variant="ghost" size="icon" className="shrink-0 text-muted-foreground hover:text-foreground" aria-label="Anexar arquivo">
-                  <Paperclip className="h-5 w-5" />
+            {!isRecording && (
+              <>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button type="button" variant="ghost" size="icon" className="shrink-0 text-muted-foreground hover:text-foreground" aria-label="Anexar arquivo">
+                      <Paperclip className="h-5 w-5" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" side="top" sideOffset={12} className="w-[300px] rounded-lg border-border bg-card p-3 shadow-xl">
+                    <div className="grid grid-cols-3 gap-2">
+                      <DropdownMenuItem
+                        className={attachmentMenuItemClass}
+                        onSelect={() => photoInputRef.current?.click()}
+                      >
+                        <span className="flex h-9 w-9 items-center justify-center rounded-full bg-blue-500 text-black shadow-sm ring-1 ring-black/10 dark:text-white dark:ring-white/15">
+                          <FileImage className="h-5 w-5 text-current" />
+                        </span>
+                        Fotos
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        className={attachmentMenuItemClass}
+                        onSelect={() => videoInputRef.current?.click()}
+                      >
+                        <span className="flex h-9 w-9 items-center justify-center rounded-full bg-rose-600 text-black shadow-sm ring-1 ring-black/10 dark:text-white dark:ring-white/15">
+                          <Video className="h-5 w-5 text-current" />
+                        </span>
+                        Videos
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        className={attachmentMenuItemClass}
+                        onSelect={() => fileInputRef.current?.click()}
+                      >
+                        <span className="flex h-9 w-9 items-center justify-center rounded-full bg-violet-600 text-black shadow-sm ring-1 ring-black/10 dark:text-white dark:ring-white/15">
+                          <FileText className="h-5 w-5 text-current" />
+                        </span>
+                        Documentos
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        className={attachmentMenuItemClass}
+                        onSelect={() => cameraInputRef.current?.click()}
+                      >
+                        <span className="flex h-9 w-9 items-center justify-center rounded-full bg-orange-600 text-black shadow-sm ring-1 ring-black/10 dark:text-white dark:ring-white/15">
+                          <Camera className="h-5 w-5 text-current" />
+                        </span>
+                        Camera
+                      </DropdownMenuItem>
+                      <DropdownMenuItem aria-disabled className={disabledAttachmentMenuItemClass} onSelect={(event) => event.preventDefault()}>
+                        <span className="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-600 text-black shadow-sm ring-1 ring-black/10 dark:text-white dark:ring-white/15">
+                          <MapPin className="h-5 w-5 text-current" />
+                        </span>
+                        Localizacao
+                      </DropdownMenuItem>
+                      <DropdownMenuItem aria-disabled className={disabledAttachmentMenuItemClass} onSelect={(event) => event.preventDefault()}>
+                        <span className="flex h-9 w-9 items-center justify-center rounded-full bg-amber-600 text-black shadow-sm ring-1 ring-black/10 dark:text-white dark:ring-white/15">
+                          <UserRound className="h-5 w-5 text-current" />
+                        </span>
+                        Contato
+                      </DropdownMenuItem>
+                    </div>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                <Input
+                  value={draft}
+                  onChange={(event) => setDraft(event.target.value)}
+                  disabled={isSending}
+                  placeholder={attachment ? "Legenda opcional" : "Digite uma mensagem"}
+                  className="flex-1 border-0 bg-secondary"
+                />
+                <Button
+                  type="submit"
+                  disabled={isSending || (!draft.trim() && !attachment)}
+                  size="icon"
+                  className="shrink-0 rounded-full bg-teal-500 text-white hover:bg-teal-600"
+                  aria-label="Enviar mensagem"
+                >
+                  <Send className="h-5 w-5" />
                 </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" side="top" sideOffset={12} className="w-[300px] rounded-lg border-border bg-card p-3 shadow-xl">
-                <div className="grid grid-cols-3 gap-2">
-                  <DropdownMenuItem
-                    className={attachmentMenuItemClass}
-                    onSelect={() => photoInputRef.current?.click()}
-                  >
-                    <span className="flex h-9 w-9 items-center justify-center rounded-full bg-blue-500 text-black shadow-sm ring-1 ring-black/10 dark:text-white dark:ring-white/15">
-                      <FileImage className="h-5 w-5 text-current" />
-                    </span>
-                    Fotos
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    className={attachmentMenuItemClass}
-                    onSelect={() => videoInputRef.current?.click()}
-                  >
-                    <span className="flex h-9 w-9 items-center justify-center rounded-full bg-rose-600 text-black shadow-sm ring-1 ring-black/10 dark:text-white dark:ring-white/15">
-                      <Video className="h-5 w-5 text-current" />
-                    </span>
-                    Videos
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    className={attachmentMenuItemClass}
-                    onSelect={() => fileInputRef.current?.click()}
-                  >
-                    <span className="flex h-9 w-9 items-center justify-center rounded-full bg-violet-600 text-black shadow-sm ring-1 ring-black/10 dark:text-white dark:ring-white/15">
-                      <FileText className="h-5 w-5 text-current" />
-                    </span>
-                    Documentos
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    className={attachmentMenuItemClass}
-                    onSelect={() => cameraInputRef.current?.click()}
-                  >
-                    <span className="flex h-9 w-9 items-center justify-center rounded-full bg-orange-600 text-black shadow-sm ring-1 ring-black/10 dark:text-white dark:ring-white/15">
-                      <Camera className="h-5 w-5 text-current" />
-                    </span>
-                    Camera
-                  </DropdownMenuItem>
-                  <DropdownMenuItem aria-disabled className={disabledAttachmentMenuItemClass} onSelect={(event) => event.preventDefault()}>
-                    <span className="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-600 text-black shadow-sm ring-1 ring-black/10 dark:text-white dark:ring-white/15">
-                      <MapPin className="h-5 w-5 text-current" />
-                    </span>
-                    Localizacao
-                  </DropdownMenuItem>
-                  <DropdownMenuItem aria-disabled className={disabledAttachmentMenuItemClass} onSelect={(event) => event.preventDefault()}>
-                    <span className="flex h-9 w-9 items-center justify-center rounded-full bg-amber-600 text-black shadow-sm ring-1 ring-black/10 dark:text-white dark:ring-white/15">
-                      <UserRound className="h-5 w-5 text-current" />
-                    </span>
-                    Contato
-                  </DropdownMenuItem>
-                </div>
-              </DropdownMenuContent>
-            </DropdownMenu>
-            <Input
-              value={draft}
-              onChange={(event) => setDraft(event.target.value)}
-              disabled={isSending}
-              placeholder={attachment ? "Legenda opcional" : "Digite uma mensagem"}
-              className="flex-1 border-0 bg-secondary"
-            />
-            <Button
-              type="submit"
-              disabled={isSending || (!draft.trim() && !attachment)}
-              size="icon"
-              className="shrink-0 rounded-full bg-teal-500 text-white hover:bg-teal-600"
-              aria-label="Enviar mensagem"
-            >
-              <Send className="h-5 w-5" />
-            </Button>
+              </>
+            )}
           </div>
         </form>
       </div>
