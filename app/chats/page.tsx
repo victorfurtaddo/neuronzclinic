@@ -11,7 +11,9 @@ import {
   fetchLatestMessageStatuses,
   fetchMessages,
   deleteMessage,
+  deleteMessages,
   forwardMessage,
+  forwardMessages,
   sendMessage,
 } from "@/lib/supabase-rest"
 
@@ -297,6 +299,17 @@ export default function ChatsPage() {
     [refreshMessagesAfterSend, selectedChatRemoteId],
   )
 
+  const handleForwardMessages = useCallback(
+    async ({ messages, targetChatId }: { messages: MessageRecord[]; targetChatId: string }) => {
+      await forwardMessages({ messages, targetChatId })
+
+      if (targetChatId === selectedChatRemoteId) {
+        await refreshMessagesAfterSend(targetChatId, messages[messages.length - 1]?.id || "")
+      }
+    },
+    [refreshMessagesAfterSend, selectedChatRemoteId],
+  )
+
   const handleDeleteMessage = useCallback(
     async (message: MessageRecord) => {
       if (!selectedChatRemoteId) return
@@ -319,6 +332,35 @@ export default function ChatsPage() {
       } catch (err) {
         setMessages(previousMessages)
         setError(err instanceof Error ? err.message : "Nao foi possivel apagar a mensagem.")
+        throw err
+      }
+    },
+    [messages, selectedChatRemoteId],
+  )
+
+  const handleDeleteMessages = useCallback(
+    async (messagesToDelete: MessageRecord[]) => {
+      if (!selectedChatRemoteId || messagesToDelete.length === 0) return
+
+      const idsToDelete = new Set(messagesToDelete.map((message) => message.id))
+      const previousMessages = messages
+      setMessages((current) =>
+        current.map((currentMessage) =>
+          idsToDelete.has(currentMessage.id)
+            ? {
+                ...currentMessage,
+                status: "deleted",
+              }
+            : currentMessage,
+        ),
+      )
+      setError(undefined)
+
+      try {
+        await deleteMessages({ chatId: selectedChatRemoteId, messages: messagesToDelete })
+      } catch (err) {
+        setMessages(previousMessages)
+        setError(err instanceof Error ? err.message : "Nao foi possivel apagar as mensagens.")
         throw err
       }
     },
@@ -462,7 +504,9 @@ export default function ChatsPage() {
         onSendMessage={handleSendMessage}
         onReplyMessage={handleReplyMessage}
         onForwardMessage={handleForwardMessage}
+        onForwardMessages={handleForwardMessages}
         onDeleteMessage={handleDeleteMessage}
+        onDeleteMessages={handleDeleteMessages}
         forwardTargets={chats}
         error={error}
       />

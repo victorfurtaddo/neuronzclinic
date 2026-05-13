@@ -83,9 +83,19 @@ export interface ForwardMessageInput {
   message: MessageRecord
 }
 
+export interface ForwardMessagesInput {
+  targetChatId: string
+  messages: MessageRecord[]
+}
+
 export interface DeleteMessageInput {
   chatId: string
   message: MessageRecord
+}
+
+export interface DeleteMessagesInput {
+  chatId: string
+  messages: MessageRecord[]
 }
 
 export interface LatestMessageStatusRecord {
@@ -257,7 +267,19 @@ export async function sendMessage({ chatId, text, file, replyTo }: SendMessageIn
   return response.json()
 }
 
-export async function forwardMessage({ targetChatId, message }: ForwardMessageInput) {
+function getForwardMessagePayload(message: MessageRecord) {
+  return {
+    id: message.id,
+    message_id: message.message_id || message.id,
+    message_type: message.message_type || "text",
+    content: message.content || "",
+    media_url: message.public_media_url || message.media_url || null,
+    media_path: message.media_path || null,
+    media_mime_type: message.media_mime_type || null,
+  }
+}
+
+export async function forwardMessages({ targetChatId, messages }: ForwardMessagesInput) {
   const response = await fetch("/api/message-action", {
     method: "POST",
     headers: {
@@ -266,11 +288,7 @@ export async function forwardMessage({ targetChatId, message }: ForwardMessageIn
     body: JSON.stringify({
       action: "forward",
       target_chat_id: targetChatId,
-      message_id: message.message_id || message.id,
-      message_type: message.message_type || "text",
-      content: message.content || "",
-      media_url: message.public_media_url || message.media_url || null,
-      media_mime_type: message.media_mime_type || null,
+      messages: messages.map(getForwardMessagePayload),
     }),
   })
 
@@ -282,7 +300,20 @@ export async function forwardMessage({ targetChatId, message }: ForwardMessageIn
   return response.json()
 }
 
-export async function deleteMessage({ chatId, message }: DeleteMessageInput) {
+export function forwardMessage({ targetChatId, message }: ForwardMessageInput) {
+  return forwardMessages({ targetChatId, messages: [message] })
+}
+
+function getDeleteMessagePayload(message: MessageRecord) {
+  return {
+    id: message.id,
+    chat_id: message.chat_id,
+    message_id: message.message_id || message.id,
+    from_me: !!message.from_me,
+  }
+}
+
+export async function deleteMessages({ chatId, messages }: DeleteMessagesInput) {
   const response = await fetch("/api/message-action", {
     method: "POST",
     headers: {
@@ -291,8 +322,7 @@ export async function deleteMessage({ chatId, message }: DeleteMessageInput) {
     body: JSON.stringify({
       action: "delete",
       chat_id: chatId,
-      message_id: message.message_id || message.id,
-      from_me: !!message.from_me,
+      messages: messages.map(getDeleteMessagePayload),
     }),
   })
 
@@ -302,4 +332,8 @@ export async function deleteMessage({ chatId, message }: DeleteMessageInput) {
   }
 
   return response.json()
+}
+
+export function deleteMessage({ chatId, message }: DeleteMessageInput) {
+  return deleteMessages({ chatId, messages: [message] })
 }

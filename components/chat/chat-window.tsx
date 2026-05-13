@@ -3,14 +3,14 @@
 import Image from "next/image";
 import type { FormEvent, MouseEvent, UIEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Camera, Check, Download, FileImage, FileText, Forward, MapPin, Mic, MoreHorizontal, Paperclip, Pause, PenLine, PlayIcon, Reply, Send, Trash2, UserRound, Video, X } from "lucide-react";
+import { Camera, Check, CheckSquare, Download, FileImage, FileText, Forward, MapPin, Mic, MoreHorizontal, Paperclip, Pause, PenLine, PlayIcon, Reply, Search, Send, Trash2, UserRound, Video, X } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { extractQuotedMessageInfo } from "@/lib/message-replies";
 import { cn } from "@/lib/utils";
-import { ChatRecord, MessageRecord } from "@/lib/supabase-rest";
+import { ChatRecord, MessageRecord, fetchChats } from "@/lib/supabase-rest";
 import { ContactDetails } from "./contact-details";
 import { MessageStatusIcon } from "./message-status-icon";
 
@@ -18,6 +18,7 @@ type AttachmentPreviewKind = "image" | "video" | "audio" | "document";
 
 const attachmentMenuItemClass = "flex h-[76px] cursor-pointer flex-col items-center justify-center gap-2 rounded-md p-2 text-xs font-medium text-foreground transition-colors focus:bg-muted";
 const disabledAttachmentMenuItemClass = "flex h-[76px] cursor-not-allowed flex-col items-center justify-center gap-2 rounded-md p-2 text-xs font-medium text-muted-foreground focus:bg-transparent";
+const FORWARD_TARGET_PAGE_SIZE = 50;
 
 interface ChatWindowProps {
   chat?: ChatRecord;
@@ -30,7 +31,9 @@ interface ChatWindowProps {
   onSendMessage?: (input: { text: string; file: File | null }) => Promise<void>;
   onReplyMessage?: (input: { text: string; file: File | null; replyTo: MessageRecord }) => Promise<void>;
   onForwardMessage?: (input: { message: MessageRecord; targetChatId: string }) => Promise<void>;
+  onForwardMessages?: (input: { messages: MessageRecord[]; targetChatId: string }) => Promise<void>;
   onDeleteMessage?: (message: MessageRecord) => Promise<void>;
+  onDeleteMessages?: (messages: MessageRecord[]) => Promise<void>;
   forwardTargets?: ChatRecord[];
   error?: string;
 }
@@ -222,7 +225,9 @@ export function ChatWindow({
   onSendMessage,
   onReplyMessage,
   onForwardMessage,
+  onForwardMessages,
   onDeleteMessage,
+  onDeleteMessages,
   forwardTargets = [],
   error,
 }: ChatWindowProps) {
@@ -233,9 +238,16 @@ export function ChatWindow({
   const [expandedImage, setExpandedImage] = useState<{ url: string; alt: string } | null>(null);
   const [isSending, setIsSending] = useState(false);
   const [replyTo, setReplyTo] = useState<MessageRecord | null>(null);
-  const [forwardingMessage, setForwardingMessage] = useState<MessageRecord | null>(null);
-  const [deleteConfirmationMessage, setDeleteConfirmationMessage] = useState<MessageRecord | null>(null);
+  const [forwardingMessages, setForwardingMessages] = useState<MessageRecord[]>([]);
+  const [deleteConfirmationMessages, setDeleteConfirmationMessages] = useState<MessageRecord[]>([]);
+  const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(() => new Set());
   const [selectedForwardTarget, setSelectedForwardTarget] = useState("");
+  const [forwardSearch, setForwardSearch] = useState("");
+  const [debouncedForwardSearch, setDebouncedForwardSearch] = useState("");
+  const [forwardTargetResults, setForwardTargetResults] = useState<ChatRecord[]>(forwardTargets);
+  const [isLoadingForwardTargets, setIsLoadingForwardTargets] = useState(false);
+  const [isLoadingMoreForwardTargets, setIsLoadingMoreForwardTargets] = useState(false);
+  const [hasMoreForwardTargets, setHasMoreForwardTargets] = useState(false);
   const [isForwarding, setIsForwarding] = useState(false);
   const [messageActionError, setMessageActionError] = useState<string | null>(null);
   const [isRecording, setIsRecording] = useState(false);
@@ -324,6 +336,16 @@ export function ChatWindow({
     }, new Map());
   }, [messages]);
 
+  const selectedMessages = useMemo(() => {
+    return messages.filter((message) => selectedMessageIds.has(message.id) && !isDeletedMessage(message));
+  }, [messages, selectedMessageIds]);
+
+  const isSelectionMode = selectedMessages.length > 0;
+  const canDeleteSelectedMessages = selectedMessages.length > 0 && selectedMessages.every((message) => !!message.from_me);
+  const selectedForwardTargetRecord = useMemo(() => {
+    return forwardTargetResults.find((target) => target.chat_id === selectedForwardTarget) || forwardTargets.find((target) => target.chat_id === selectedForwardTarget);
+  }, [forwardTargetResults, forwardTargets, selectedForwardTarget]);
+
   const attachmentPreviewUrl = useMemo(() => (attachment ? URL.createObjectURL(attachment) : null), [attachment]);
 
   useEffect(() => {
@@ -331,6 +353,46 @@ export function ChatWindow({
       if (attachmentPreviewUrl) URL.revokeObjectURL(attachmentPreviewUrl);
     };
   }, [attachmentPreviewUrl]);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      setDebouncedForwardSearch(forwardSearch.trim());
+    }, 250);
+
+    return () => window.clearTimeout(timeout);
+  }, [forwardSearch]);
+
+  useEffect(() => {
+    if (forwardingMessages.length === 0) return;
+
+    let isMounted = true;
+
+    async function loadForwardTargets() {
+      const term = debouncedForwardSearch.trim();
+
+      setIsLoadingForwardTargets(true);
+      try {
+        const data = await fetchChats({ limit: FORWARD_TARGET_PAGE_SIZE, offset: 0, search: term || undefined });
+        if (!isMounted) return;
+        setForwardTargetResults(data);
+        setHasMoreForwardTargets(data.length === FORWARD_TARGET_PAGE_SIZE);
+        setSelectedForwardTarget((current) => current || chat?.chat_id || data[0]?.chat_id || "");
+      } catch (error) {
+        if (!isMounted) return;
+        setForwardTargetResults([]);
+        setHasMoreForwardTargets(false);
+        setMessageActionError(error instanceof Error ? error.message : "Nao foi possivel buscar os chats.");
+      } finally {
+        if (isMounted) setIsLoadingForwardTargets(false);
+      }
+    }
+
+    void loadForwardTargets();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [chat?.chat_id, debouncedForwardSearch, forwardingMessages.length]);
 
   useEffect(() => {
     const scrollArea = scrollAreaRef.current;
@@ -352,13 +414,36 @@ export function ChatWindow({
       if (event.key !== "Escape") return;
 
       event.preventDefault();
+      if (selectedMessageIds.size > 0) {
+        setSelectedMessageIds(new Set());
+        return;
+      }
+      if (forwardingMessages.length > 0) {
+        setForwardingMessages([]);
+        return;
+      }
+      if (deleteConfirmationMessages.length > 0) {
+        setDeleteConfirmationMessages([]);
+        return;
+      }
       setIsDetailsOpen(false);
       onCloseChat?.();
     }
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [chat, onCloseChat]);
+  }, [chat, deleteConfirmationMessages.length, forwardingMessages.length, onCloseChat, selectedMessageIds.size]);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      setSelectedMessageIds(new Set());
+      setForwardingMessages([]);
+      setDeleteConfirmationMessages([]);
+      setMessageActionError(null);
+    }, 0);
+
+    return () => window.clearTimeout(timeout);
+  }, [chat?.id]);
 
   useEffect(() => {
     return () => {
@@ -435,28 +520,96 @@ export function ChatWindow({
   function beginReply(message: MessageRecord) {
     if (isDeletedMessage(message)) return;
 
+    setSelectedMessageIds(new Set());
     setReplyTo(message);
     setMessageActionError(null);
   }
 
-  function beginForward(message: MessageRecord) {
-    if (isDeletedMessage(message)) return;
-
-    setForwardingMessage(message);
-    setSelectedForwardTarget(chat?.chat_id || "");
+  function clearSelectedMessages() {
+    setSelectedMessageIds(new Set());
     setMessageActionError(null);
   }
 
+  function toggleMessageSelection(message: MessageRecord) {
+    if (isDeletedMessage(message)) return;
+
+    setReplyTo(null);
+    setMessageActionError(null);
+    setSelectedMessageIds((current) => {
+      const next = new Set(current);
+      if (next.has(message.id)) {
+        next.delete(message.id);
+      } else {
+        next.add(message.id);
+      }
+      return next;
+    });
+  }
+
+  function openForwardMessages(messagesToForward: MessageRecord[]) {
+    const validMessages = messagesToForward.filter((message) => !isDeletedMessage(message));
+    if (validMessages.length === 0) return;
+
+    setForwardingMessages(validMessages);
+    setSelectedForwardTarget(chat?.chat_id || "");
+    setForwardSearch("");
+    setDebouncedForwardSearch("");
+    setForwardTargetResults(forwardTargets);
+    setMessageActionError(null);
+  }
+
+  function beginForward(message: MessageRecord) {
+    openForwardMessages([message]);
+  }
+
+  function beginForwardSelected() {
+    openForwardMessages(selectedMessages);
+  }
+
+  async function loadMoreForwardTargets() {
+    if (isLoadingMoreForwardTargets || !hasMoreForwardTargets) return;
+
+    setIsLoadingMoreForwardTargets(true);
+    setMessageActionError(null);
+
+    try {
+      const data = await fetchChats({
+        limit: FORWARD_TARGET_PAGE_SIZE,
+        offset: forwardTargetResults.length,
+        search: debouncedForwardSearch || undefined,
+      });
+      setForwardTargetResults((current) => {
+        const knownIds = new Set(current.map((target) => target.id));
+        return [...current, ...data.filter((target) => !knownIds.has(target.id))];
+      });
+      setHasMoreForwardTargets(data.length === FORWARD_TARGET_PAGE_SIZE);
+    } catch (error) {
+      setMessageActionError(error instanceof Error ? error.message : "Nao foi possivel carregar mais chats.");
+    } finally {
+      setIsLoadingMoreForwardTargets(false);
+    }
+  }
+
   async function handleForwardSubmit() {
-    if (!forwardingMessage || !selectedForwardTarget || !onForwardMessage || isForwarding) return;
+    if (forwardingMessages.length === 0 || !selectedForwardTarget || isForwarding) return;
 
     setIsForwarding(true);
     setMessageActionError(null);
 
     try {
-      await onForwardMessage({ message: forwardingMessage, targetChatId: selectedForwardTarget });
-      setForwardingMessage(null);
+      if (forwardingMessages.length > 1 && onForwardMessages) {
+        await onForwardMessages({ messages: forwardingMessages, targetChatId: selectedForwardTarget });
+      } else if (forwardingMessages.length === 1 && onForwardMessage) {
+        await onForwardMessage({ message: forwardingMessages[0], targetChatId: selectedForwardTarget });
+      } else if (onForwardMessages) {
+        await onForwardMessages({ messages: forwardingMessages, targetChatId: selectedForwardTarget });
+      } else {
+        throw new Error("Encaminhamento indisponivel.");
+      }
+
+      setForwardingMessages([]);
       setSelectedForwardTarget("");
+      clearSelectedMessages();
     } catch (error) {
       setMessageActionError(error instanceof Error ? error.message : "Nao foi possivel encaminhar a mensagem.");
     } finally {
@@ -465,23 +618,40 @@ export function ChatWindow({
   }
 
   function beginDelete(message: MessageRecord) {
-    if (isDeletedMessage(message)) return;
+    if (isDeletedMessage(message) || !message.from_me) return;
 
     setMessageActionError(null);
-    setDeleteConfirmationMessage(message);
+    setDeleteConfirmationMessages([message]);
+  }
+
+  function beginDeleteSelected() {
+    if (!canDeleteSelectedMessages) return;
+
+    setMessageActionError(null);
+    setDeleteConfirmationMessages(selectedMessages);
   }
 
   async function handleDeleteMessage() {
-    if (!deleteConfirmationMessage || !onDeleteMessage || isDeletedMessage(deleteConfirmationMessage)) return;
+    const messagesToDelete = deleteConfirmationMessages.filter((message) => !isDeletedMessage(message) && message.from_me);
+    if (messagesToDelete.length === 0) return;
 
-    const message = deleteConfirmationMessage;
     setMessageActionError(null);
 
     try {
-      await onDeleteMessage(message);
-      setDeleteConfirmationMessage(null);
+      if (messagesToDelete.length > 1 && onDeleteMessages) {
+        await onDeleteMessages(messagesToDelete);
+      } else if (messagesToDelete.length === 1 && onDeleteMessage) {
+        await onDeleteMessage(messagesToDelete[0]);
+      } else if (onDeleteMessages) {
+        await onDeleteMessages(messagesToDelete);
+      } else {
+        throw new Error("Apagamento indisponivel.");
+      }
+
+      setDeleteConfirmationMessages([]);
+      clearSelectedMessages();
     } catch (error) {
-      setMessageActionError(error instanceof Error ? error.message : "Nao foi possivel apagar a mensagem.");
+      setMessageActionError(error instanceof Error ? error.message : "Nao foi possivel apagar as mensagens.");
     }
   }
 
@@ -640,25 +810,51 @@ export function ChatWindow({
     <div className="flex h-full flex-1 overflow-hidden bg-background">
       <div className="flex flex-1 flex-col border-r border-border">
         <div className="flex items-center justify-between border-b border-border bg-card px-4 py-3">
-          <div className="flex items-center gap-3">
-            <button onClick={() => setIsDetailsOpen(true)} className="rounded-full transition-opacity hover:opacity-90" aria-label="Abrir detalhes do contato">
-              <Avatar className="h-10 w-10">
-                <AvatarImage src={chat.url_foto_perfil ?? undefined} alt={getDisplayName(chat)} />
-                <AvatarFallback className="bg-gradient-to-br from-teal-500 to-teal-700 text-sm font-semibold text-white">{getDisplayName(chat).slice(0, 1).toUpperCase()}</AvatarFallback>
-              </Avatar>
-            </button>
-            <div className="flex min-w-0 flex-col">
-              <span className="truncate font-medium leading-none text-foreground">{getDisplayName(chat)}</span>
-              <span className="mt-1 text-[10px] text-muted-foreground">{chat.finalizada ? "Finalizada" : chat.ia_responde ? "IA responde" : "Atendimento aberto"}</span>
-            </div>
-          </div>
+          {isSelectionMode ? (
+            <>
+              <div className="flex min-w-0 items-center gap-3">
+                <Button type="button" variant="ghost" size="icon" onClick={clearSelectedMessages} aria-label="Cancelar selecao">
+                  <X className="h-5 w-5" />
+                </Button>
+                <span className="truncate text-sm font-semibold text-foreground">
+                  {selectedMessages.length} {selectedMessages.length === 1 ? "mensagem selecionada" : "mensagens selecionadas"}
+                </span>
+              </div>
 
-          <div className="flex items-center gap-2">
-            <Button className="bg-teal-500 px-4 font-medium text-white hover:bg-teal-600">{chat.finalizada ? "Reabrir" : "Finalizar"}</Button>
-            <Button variant="ghost" size="icon" onClick={() => setIsDetailsOpen(!isDetailsOpen)} className={cn("text-muted-foreground hover:text-foreground", isDetailsOpen && "bg-muted")}>
-              <MoreHorizontal className="h-5 w-5" />
-            </Button>
-          </div>
+              <div className="flex items-center gap-1">
+                <Button type="button" variant="ghost" size="icon" onClick={beginForwardSelected} aria-label="Encaminhar selecionadas">
+                  <Forward className="h-5 w-5" />
+                </Button>
+                {canDeleteSelectedMessages && (
+                  <Button type="button" variant="ghost" size="icon" className="text-muted-foreground hover:text-red-500" onClick={beginDeleteSelected} aria-label="Apagar selecionadas">
+                    <Trash2 className="h-5 w-5" />
+                  </Button>
+                )}
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="flex items-center gap-3">
+                <button onClick={() => setIsDetailsOpen(true)} className="rounded-full transition-opacity hover:opacity-90" aria-label="Abrir detalhes do contato">
+                  <Avatar className="h-10 w-10">
+                    <AvatarImage src={chat.url_foto_perfil ?? undefined} alt={getDisplayName(chat)} />
+                    <AvatarFallback className="bg-gradient-to-br from-teal-500 to-teal-700 text-sm font-semibold text-white">{getDisplayName(chat).slice(0, 1).toUpperCase()}</AvatarFallback>
+                  </Avatar>
+                </button>
+                <div className="flex min-w-0 flex-col">
+                  <span className="truncate font-medium leading-none text-foreground">{getDisplayName(chat)}</span>
+                  <span className="mt-1 text-[10px] text-muted-foreground">{chat.finalizada ? "Finalizada" : chat.ia_responde ? "IA responde" : "Atendimento aberto"}</span>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Button className="bg-teal-500 px-4 font-medium text-white hover:bg-teal-600">{chat.finalizada ? "Reabrir" : "Finalizar"}</Button>
+                <Button variant="ghost" size="icon" onClick={() => setIsDetailsOpen(!isDetailsOpen)} className={cn("text-muted-foreground hover:text-foreground", isDetailsOpen && "bg-muted")}>
+                  <MoreHorizontal className="h-5 w-5" />
+                </Button>
+              </div>
+            </>
+          )}
         </div>
 
         <div
@@ -713,6 +909,7 @@ export function ChatWindow({
                       const mediaKind = getMediaKind(message);
                       const hasCaption = !!message.content?.trim();
                       const deleted = isDeletedMessage(message);
+                      const selected = selectedMessageIds.has(message.id);
                       const quotedInfo = getQuotedMessage(message);
                       const quotedOriginal = quotedInfo?.messageId ? messagesByRemoteId.get(quotedInfo.messageId) : null;
                       const quotedMessage = quotedOriginal
@@ -724,11 +921,25 @@ export function ChatWindow({
                       const quotedKind = quotedOriginal ? getMediaKind(quotedOriginal) : null;
 
                       return (
-                        <div key={message.id} className={cn("mb-2 flex", fromMe ? "justify-end" : "justify-start")}>
+                        <div key={message.id} className={cn("mb-2 flex items-center gap-2", fromMe ? "justify-end" : "justify-start")}>
+                          {isSelectionMode && !deleted && (
+                            <button
+                              type="button"
+                              className={cn(
+                                "flex h-7 w-7 shrink-0 items-center justify-center rounded-full border transition-colors",
+                                selected ? "border-teal-500 bg-teal-500 text-white" : "border-(--chat-muted-foreground)/40 bg-(--chat-card)/80 text-transparent hover:border-teal-500",
+                              )}
+                              onClick={() => toggleMessageSelection(message)}
+                              aria-label={selected ? "Remover mensagem da selecao" : "Selecionar mensagem"}
+                            >
+                              <Check className="h-4 w-4" />
+                            </button>
+                          )}
                           <div
                             className={cn(
                               "group relative min-w-[168px] max-w-[72%] rounded-lg px-3 py-2 shadow-sm transition-colors sm:min-w-[196px]",
                               fromMe ? "rounded-tr-none bg-(--chat-me)" : "rounded-tl-none bg-(--chat-other)",
+                              selected && "ring-2 ring-teal-500/70",
                               deleted && "border border-dashed border-red-500/45 bg-(--chat-muted)/80 opacity-80 shadow-none saturate-[0.65]",
                             )}
                           >
@@ -741,6 +952,9 @@ export function ChatWindow({
                                 </Button>
                                 <Button type="button" variant="ghost" size="icon-sm" className="h-7 w-7 rounded-full text-muted-foreground hover:text-foreground" onClick={() => beginForward(message)} aria-label="Encaminhar mensagem">
                                   <Forward className="h-4 w-4" />
+                                </Button>
+                                <Button type="button" variant="ghost" size="icon-sm" className="h-7 w-7 rounded-full text-muted-foreground hover:text-foreground" onClick={() => toggleMessageSelection(message)} aria-label="Selecionar mensagem">
+                                  <CheckSquare className="h-4 w-4" />
                                 </Button>
                                 {fromMe && (
                                   <Button type="button" variant="ghost" size="icon-sm" className="h-7 w-7 rounded-full text-muted-foreground hover:text-red-500" onClick={() => beginDelete(message)} aria-label="Apagar mensagem">
@@ -1219,44 +1433,95 @@ export function ChatWindow({
         </div>
       )}
 
-      {forwardingMessage && (
+      {forwardingMessages.length > 0 && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-lg border border-border bg-card shadow-2xl">
+          <div className="w-full max-w-xl rounded-lg border border-border bg-card shadow-2xl">
             <div className="flex items-center justify-between border-b border-border px-4 py-3">
               <div className="min-w-0">
-                <p className="text-sm font-semibold text-foreground">Encaminhar mensagem</p>
-                <p className="truncate text-xs text-muted-foreground">{getMessagePreviewText(forwardingMessage)}</p>
+                <p className="text-sm font-semibold text-foreground">
+                  Encaminhar {forwardingMessages.length === 1 ? "mensagem" : `${forwardingMessages.length} mensagens`}
+                </p>
+                <p className="truncate text-xs text-muted-foreground">
+                  {selectedForwardTargetRecord ? `Para ${getDisplayName(selectedForwardTargetRecord)}` : "Escolha um contato"}
+                </p>
               </div>
-              <Button type="button" variant="ghost" size="icon" onClick={() => setForwardingMessage(null)} aria-label="Fechar encaminhamento">
+              <Button type="button" variant="ghost" size="icon" onClick={() => setForwardingMessages([])} aria-label="Fechar encaminhamento">
                 <X className="h-5 w-5" />
               </Button>
             </div>
 
             <div className="space-y-3 p-4">
-              <label className="block text-xs font-medium text-muted-foreground" htmlFor="forward-target">
-                Enviar para
-              </label>
-              <select
-                id="forward-target"
-                value={selectedForwardTarget}
-                onChange={(event) => setSelectedForwardTarget(event.target.value)}
-                className="h-10 w-full rounded-md border border-border bg-secondary px-3 text-sm text-foreground outline-none transition-colors focus:border-teal-500"
-              >
-                {forwardTargets.map((target) => (
-                  <option key={target.id} value={target.chat_id}>
-                    {getDisplayName(target)}
-                  </option>
-                ))}
-              </select>
-
-              <div className="rounded-md border-l-4 border-teal-500 bg-secondary px-3 py-2">
-                <p className="text-xs font-semibold text-teal-600 dark:text-teal-300">{forwardingMessage.from_me ? "Voce" : getDisplayName(chat)}</p>
-                <p className="mt-1 line-clamp-3 text-sm text-muted-foreground">{getMessagePreviewText(forwardingMessage)}</p>
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={forwardSearch}
+                  onChange={(event) => setForwardSearch(event.target.value)}
+                  placeholder="Pesquisar todos os chats"
+                  className="border-border bg-secondary pl-9"
+                />
               </div>
+
+              <div className="max-h-56 overflow-y-auto rounded-md border border-border">
+                {isLoadingForwardTargets ? (
+                  <p className="px-3 py-4 text-center text-xs text-muted-foreground">Buscando chats...</p>
+                ) : forwardTargetResults.length === 0 ? (
+                  <p className="px-3 py-4 text-center text-xs text-muted-foreground">Nenhum chat encontrado.</p>
+                ) : (
+                  forwardTargetResults.map((target) => {
+                    const isSelectedTarget = selectedForwardTarget === target.chat_id;
+
+                    return (
+                      <button
+                        key={target.id}
+                        type="button"
+                        className={cn(
+                          "flex w-full items-center gap-3 border-b border-border px-3 py-2 text-left last:border-b-0 transition-colors hover:bg-secondary",
+                          isSelectedTarget && "bg-teal-500/10",
+                        )}
+                        onClick={() => setSelectedForwardTarget(target.chat_id)}
+                      >
+                        <Avatar className="h-8 w-8">
+                          <AvatarImage src={target.url_foto_perfil ?? undefined} alt={getDisplayName(target)} />
+                          <AvatarFallback className="bg-teal-500 text-xs font-semibold text-white">{getDisplayName(target).slice(0, 1).toUpperCase()}</AvatarFallback>
+                        </Avatar>
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-sm font-medium text-foreground">{getDisplayName(target)}</span>
+                          <span className="block truncate text-xs text-muted-foreground">{target.phone_contact || target.chat_id}</span>
+                        </span>
+                        <span
+                          className={cn(
+                            "flex h-5 w-5 shrink-0 items-center justify-center rounded-full border",
+                            isSelectedTarget ? "border-teal-500 bg-teal-500 text-white" : "border-muted-foreground/30 text-transparent",
+                          )}
+                        >
+                          <Check className="h-3.5 w-3.5" />
+                        </span>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+
+              {hasMoreForwardTargets && (
+                <Button type="button" variant="ghost" className="w-full" onClick={loadMoreForwardTargets} disabled={isLoadingMoreForwardTargets}>
+                  {isLoadingMoreForwardTargets ? "Carregando..." : "Carregar mais chats"}
+                </Button>
+              )}
+
+              <div className="max-h-32 space-y-2 overflow-y-auto rounded-md border-l-4 border-teal-500 bg-secondary px-3 py-2">
+                {forwardingMessages.map((message) => (
+                  <div key={message.id} className="min-w-0">
+                    <p className="text-xs font-semibold text-teal-600 dark:text-teal-300">{message.from_me ? "Voce" : getDisplayName(chat)}</p>
+                    <p className="mt-0.5 line-clamp-2 text-sm text-muted-foreground">{getMessagePreviewText(message)}</p>
+                  </div>
+                ))}
+              </div>
+
+              {messageActionError && <p className="rounded-md bg-red-500/10 px-3 py-2 text-xs text-red-500">{messageActionError}</p>}
             </div>
 
             <div className="flex justify-end gap-2 border-t border-border px-4 py-3">
-              <Button type="button" variant="ghost" onClick={() => setForwardingMessage(null)}>
+              <Button type="button" variant="ghost" onClick={() => setForwardingMessages([])}>
                 Cancelar
               </Button>
               <Button
@@ -1279,7 +1544,7 @@ export function ChatWindow({
         </div>
       )}
 
-      {deleteConfirmationMessage && (
+      {deleteConfirmationMessages.length > 0 && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4 backdrop-blur-sm">
           <div className="w-full max-w-md rounded-lg border border-border bg-card shadow-2xl">
             <div className="flex items-center gap-3 border-b border-border px-4 py-3">
@@ -1287,23 +1552,30 @@ export function ChatWindow({
                 <Trash2 className="h-5 w-5" />
               </span>
               <div className="min-w-0">
-                <p className="text-sm font-semibold text-foreground">Apagar mensagem?</p>
-                <p className="text-xs text-muted-foreground">A acao sera enviada ao webhook de envio. O banco nao sera alterado diretamente.</p>
+                <p className="text-sm font-semibold text-foreground">
+                  Apagar {deleteConfirmationMessages.length === 1 ? "mensagem?" : `${deleteConfirmationMessages.length} mensagens?`}
+                </p>
+                <p className="text-xs text-muted-foreground">A acao sera enviada ao webhook de apagar. O banco nao sera alterado diretamente.</p>
               </div>
             </div>
 
             <div className="space-y-3 p-4">
-              <div className="rounded-md border-l-4 border-red-500 bg-secondary px-3 py-2">
-                <p className="text-xs font-semibold text-red-500">{deleteConfirmationMessage.from_me ? "Voce" : getDisplayName(chat)}</p>
-                <p className="mt-1 line-clamp-3 text-sm text-muted-foreground">{getMessagePreviewText(deleteConfirmationMessage)}</p>
+              <div className="max-h-36 space-y-2 overflow-y-auto rounded-md border-l-4 border-red-500 bg-secondary px-3 py-2">
+                {deleteConfirmationMessages.map((message) => (
+                  <div key={message.id} className="min-w-0">
+                    <p className="text-xs font-semibold text-red-500">{message.from_me ? "Voce" : getDisplayName(chat)}</p>
+                    <p className="mt-0.5 line-clamp-2 text-sm text-muted-foreground">{getMessagePreviewText(message)}</p>
+                  </div>
+                ))}
               </div>
               <p className="text-xs leading-relaxed text-muted-foreground">
-                Depois da confirmacao, a mensagem fica marcada visualmente como apagada e o webhook recebe os dados da mensagem original para processar o apagamento.
+                Depois da confirmacao, as mensagens ficam marcadas visualmente como apagadas e o webhook recebe os dados originais para processar o apagamento.
               </p>
+              {messageActionError && <p className="rounded-md bg-red-500/10 px-3 py-2 text-xs text-red-500">{messageActionError}</p>}
             </div>
 
             <div className="flex justify-end gap-2 border-t border-border px-4 py-3">
-              <Button type="button" variant="ghost" onClick={() => setDeleteConfirmationMessage(null)}>
+              <Button type="button" variant="ghost" onClick={() => setDeleteConfirmationMessages([])}>
                 Cancelar
               </Button>
               <Button type="button" variant="destructive" onClick={handleDeleteMessage}>
