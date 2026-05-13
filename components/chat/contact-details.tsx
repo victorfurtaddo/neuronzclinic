@@ -2,16 +2,20 @@
 
 import { useState } from "react";
 import { cn } from "@/lib/utils";
-import { X, Pencil, Check, ChevronDown, Calendar, FileText, Phone } from "lucide-react";
+import { X, Pencil, ChevronDown, Calendar, FileText, Phone, CheckCheck, MessageSquareDashed, Bot } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { getChatTags, getReadableTextColor } from "@/lib/chat-tags";
 import { ChatRecord } from "@/lib/supabase-rest";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../ui/dropdown-menu";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
+import { Avatar, AvatarFallback, AvatarImage } from "../ui/avatar";
 
 interface ContactDetailsProps {
   chat?: ChatRecord;
   onClose?: () => void;
+  onToggleStatus: () => void;
 }
 
 function getDisplayName(chat?: ChatRecord) {
@@ -22,10 +26,8 @@ function getPhone(chat?: ChatRecord) {
   return chat?.phone_contact || chat?.chat_id?.replace("@s.whatsapp.net", "") || "";
 }
 
-export function ContactDetails({ chat, onClose }: ContactDetailsProps) {
-  const [activeTab, setActiveTab] = useState<"contato" | "detalhes">("detalhes");
+export function ContactDetails({ chat, onClose, onToggleStatus }: ContactDetailsProps) {
   const [bottomTab, setBottomTab] = useState<"consultas" | "avisos">("consultas");
-  const [isRead, setIsRead] = useState(false);
   const [infoExpanded, setInfoExpanded] = useState(true);
   const tags = getChatTags(chat);
 
@@ -36,54 +38,84 @@ export function ContactDetails({ chat, onClose }: ContactDetailsProps) {
 
   return (
     <div className="flex h-full w-full flex-col border-l border-border bg-card">
-      {/* Header with tabs */}
       <div className="flex items-center justify-between border-b border-border px-4 py-3">
         <div className="flex items-center gap-4">
-          <label className="text-sm font-medium transition-colors text-foreground">Contato | Detalhes</label>
+          <label className="text-sm font-medium transition-colors text-foreground">Detalhes do contato</label>
         </div>
         <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" onClick={onClose}>
           <X className="h-4 w-4" />
         </Button>
       </div>
 
-      {/* Content */}
       <div className="flex-1 overflow-y-auto p-4">
-        {/* Status badge row */}
-        <div className="mb-4 flex items-start justify-between">
-          <div className="flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-muted">
-              <div className="h-5 w-5 rounded bg-gradient-to-br from-gray-300 to-gray-400" />
+        <div className="flex items-start gap-4 p-4">
+          <Avatar className="h-16 w-16 shrink-0 shadow-sm">
+            <AvatarImage src={chat?.url_foto_perfil ?? undefined} alt={chat?.nome_contato || ""} className="rounded-full" />
+            <AvatarFallback className="bg-(--chat-muted) text-(--chat-muted-foreground)">{chat?.nome_contato?.charAt(0) || "U"}</AvatarFallback>
+          </Avatar>
+
+          <div className="flex flex-1 flex-col gap-3">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  className="flex w-full items-center justify-between rounded-md px-3 py-1.5 text-xs font-medium text-white transition-opacity hover:opacity-90 shadow-sm"
+                  style={{ backgroundColor: chat?.finalizada ? "#00c950" : "#2b7fff" }}
+                >
+                  {chat?.finalizada ? "Finalizada" : "Aberta"}
+                  <ChevronDown className="h-3 w-3" />
+                </button>
+              </DropdownMenuTrigger>
+
+              <DropdownMenuContent align="start" className="w-48 shadow-xl z-[100]">
+                <DropdownMenuItem className="cursor-pointer" onClick={() => onToggleStatus()}>
+                  {chat?.finalizada ? "Reabrir Conversa" : "Finalizar Conversa"}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            <div className="space-y-1.5">
+              <button className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground">
+                <CheckCheck className="h-3.5 w-3.5 text-blue-500" />
+                <span>Marcar como lido</span>
+              </button>
+              <button className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground">
+                <MessageSquareDashed className="h-3.5 w-3.5" />
+                <span>Marcar como não lido</span>
+              </button>
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <Phone className="h-3.5 w-3.5" />
+                <span>{chat?.phone_contact || "Sem telefone"}</span>
+              </div>
             </div>
-            <button className="flex items-center gap-1 rounded px-2.5 py-1 text-xs font-medium text-white" style={{ backgroundColor: chat?.hex_status || (chat?.finalizada ? "#6b7280" : "#22c55e") }}>
-              {chat?.finalizada ? "Finalizada" : chat?.Status_chat || "Aberta"}
-              <ChevronDown className="h-3 w-3" />
-            </button>
           </div>
-          <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground">
-            <FileText className="h-4 w-4" />
-          </Button>
+
+          <div className="flex flex-col items-center gap-3">
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    disabled={!chat?.ia_responde}
+                    className={cn("h-10 w-10 border-2 shadow-sm transition-all", chat?.ia_responde ? "border-(--chat-primary) text-(--chat-primary) hover:bg-(--chat-primary)/10" : "opacity-50")}
+                    onClick={() => /* Abrir componente de treinamento */ {}}
+                  >
+                    <Bot className="h-5 w-5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="left">
+                  <p>{chat?.ia_responde ? "Treinar sua IA" : "Ative a IA para treinar"}</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+
+            <div className="flex flex-col items-center gap-1">
+              <Switch checked={!!chat?.ia_responde} onCheckedChange={(val) => /* lógica de update ia_responde */ {}} className="data-[state=checked]:bg-[#22c55e]" />
+              <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">IA</span>
+            </div>
+          </div>
         </div>
 
-        {/* Read status options */}
-        <div className="mb-4 space-y-2">
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Check className="h-4 w-4" />
-            <span>Marcar como lido</span>
-          </div>
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Check className="h-4 w-4" />
-            <span>Marcar como não lido</span>
-          </div>
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Phone className="h-4 w-4" />
-              <span>{getPhone(chat)}</span>
-            </div>
-            <Switch checked={isRead} onCheckedChange={setIsRead} />
-          </div>
-        </div>
-
-        {/* Contact name */}
         <div className="mb-4">
           <div className="flex items-center gap-2">
             <Input value={getDisplayName(chat)} readOnly className="flex-1 border-0 border-b border-border bg-transparent px-0 text-base font-medium focus-visible:ring-0 rounded-none" />
@@ -93,7 +125,6 @@ export function ContactDetails({ chat, onClose }: ContactDetailsProps) {
           </div>
         </div>
 
-        {/* Status dropdowns row */}
         <div className="mb-4 grid grid-cols-2 gap-3">
           <div>
             <label className="mb-1.5 block text-xs text-muted-foreground">Status contato</label>
@@ -111,7 +142,6 @@ export function ContactDetails({ chat, onClose }: ContactDetailsProps) {
           </div>
         </div>
 
-        {/* Action buttons */}
         <div className="mb-4 grid grid-cols-2 gap-3">
           <button className="flex items-center justify-between rounded border border-border bg-card px-3 py-2 text-sm text-foreground hover:bg-muted">
             <span>+ Agendamento</span>
@@ -123,7 +153,6 @@ export function ContactDetails({ chat, onClose }: ContactDetailsProps) {
           </button>
         </div>
 
-        {/* Collapsible info section */}
         <div className="mb-4">
           <button onClick={() => setInfoExpanded(!infoExpanded)} className="flex w-full items-center justify-between py-2 text-sm font-medium text-foreground">
             Informações do contato
@@ -133,7 +162,6 @@ export function ContactDetails({ chat, onClose }: ContactDetailsProps) {
 
         {infoExpanded && (
           <>
-            {/* Interesses */}
             <div className="mb-4">
               <label className="mb-1.5 block text-sm font-medium text-foreground">Interesses</label>
               <button className="flex w-full items-center justify-between rounded border border-border bg-card px-3 py-2 text-sm text-muted-foreground">
@@ -142,7 +170,6 @@ export function ContactDetails({ chat, onClose }: ContactDetailsProps) {
               </button>
             </div>
 
-            {/* Tags do contato */}
             <div className="mb-4">
               <label className="mb-1.5 block text-sm font-medium text-foreground">Tags do contato</label>
               <div className="flex flex-wrap items-center gap-2 rounded border border-border bg-card px-3 py-2">
@@ -170,7 +197,6 @@ export function ContactDetails({ chat, onClose }: ContactDetailsProps) {
               </div>
             </div>
 
-            {/* Anotações */}
             <div className="mb-4">
               <label className="mb-1.5 block text-sm font-medium text-foreground">Anotações</label>
               <textarea className="min-h-[100px] w-full resize-none rounded border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring" placeholder="" />
@@ -179,7 +205,6 @@ export function ContactDetails({ chat, onClose }: ContactDetailsProps) {
         )}
       </div>
 
-      {/* Bottom tabs */}
       <div className="border-t border-border">
         <div className="flex">
           {bottomTabs.map((tab) => (
@@ -193,7 +218,6 @@ export function ContactDetails({ chat, onClose }: ContactDetailsProps) {
           ))}
         </div>
 
-        {/* Tab content placeholder */}
         <div className="h-32 p-4">{bottomTab === "consultas" ? <p className="text-sm text-muted-foreground">Nenhuma consulta registrada</p> : <p className="text-sm text-muted-foreground">Nenhum aviso ou tarefa</p>}</div>
       </div>
     </div>

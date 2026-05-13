@@ -20,6 +20,7 @@ interface ChatWindowProps {
   onCloseChat?: () => void;
   error?: string;
   onToggleDetails: () => void;
+  onToggleStatus: () => void;
   isDetailsOpen: boolean;
 }
 
@@ -81,7 +82,7 @@ function getFileName(message: MessageRecord, mediaUrl: string) {
   return name ? decodeURIComponent(name) : message.media_mime_type || message.message_type || "Arquivo";
 }
 
-export function ChatWindow({ chat, messages, isLoading, isLoadingOlder, hasMoreMessages, onLoadOlderMessages, onCloseChat, error, onToggleDetails }: ChatWindowProps) {
+export function ChatWindow({ chat, messages, isLoading, isLoadingOlder, hasMoreMessages, onLoadOlderMessages, onCloseChat, error, onToggleDetails, onToggleStatus }: ChatWindowProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const previousScrollHeightRef = useRef<number | null>(null);
@@ -207,7 +208,9 @@ export function ChatWindow({ chat, messages, isLoading, isLoadingOlder, hasMoreM
           </div>
 
           <div className="flex items-center gap-2">
-            <Button className="bg-teal-500 px-4 font-medium text-white hover:bg-teal-600">{chat.finalizada ? "Reabrir" : "Finalizar"}</Button>
+            <Button onClick={() => onToggleStatus()} className="bg-teal-500 px-4 font-medium text-white hover:bg-teal-600">
+              {chat.finalizada ? "Reabrir" : "Finalizar"}
+            </Button>
             <Button onClick={onToggleDetails} variant="ghost" size="icon" className="text-muted-foreground hover:text-foreground cursor-pointer">
               <Info className="h-5 w-5" />
             </Button>

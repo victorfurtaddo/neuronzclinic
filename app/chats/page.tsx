@@ -194,6 +194,23 @@ export default function ChatsPage() {
     };
   }, [selectedChatRemoteId]);
 
+  const handleToggleStatus = () => {
+    if (!selectedChatId) return;
+
+    const toggleStatus = (list: ChatRecord[]) => list.map((chat) => (chat.id === selectedChatId ? { ...chat, finalizada: !chat.finalizada } : chat));
+
+    setChats((current) => toggleStatus(current));
+    setSearchChats((current) => toggleStatus(current));
+
+    // 3. Persistência (Chamada de API)
+    // try {
+    //   await api.patch(`/chats/${selectedChat.id}`, { finalizada: newStatus });
+    // } catch (error) {
+    //   console.error("Erro ao atualizar status", error);
+    //   // Opcional: Reverter o estado em caso de erro (Rollback)
+    // }
+  };
+
   return (
     <div className="flex h-screen overflow-hidden bg-background">
       <ContactList
@@ -222,6 +239,7 @@ export default function ChatsPage() {
             error={error}
             onToggleDetails={() => setShowDetails(!showDetails)}
             isDetailsOpen={showDetails}
+            onToggleStatus={handleToggleStatus}
           />
         </Panel>
 
@@ -229,7 +247,7 @@ export default function ChatsPage() {
           <>
             <PanelResizeHandle className="w-1 bg-(--chat-muted)/50 transition-colors hover:bg-(--chat-primary)/50" />
             <Panel defaultSize={30} minSize={26} maxSize={40} className="bg-(--chat-card) border-l border-(--chat-muted)">
-              <ContactDetails chat={selectedChat} onClose={() => setShowDetails(false)} />
+              <ContactDetails chat={selectedChat} onClose={() => setShowDetails(false)} onToggleStatus={handleToggleStatus} />
             </Panel>
           </>
         )}
