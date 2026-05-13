@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import type { FormEvent, MouseEvent, UIEvent } from "react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, memo } from "react";
 import { Camera, Check, CheckSquare, Download, FileImage, FileText, Forward, MapPin, Mic, MoreHorizontal, Paperclip, Pause, PenLine, PlayIcon, Reply, Search, Send, Trash2, UserRound, Video, X } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -214,6 +214,268 @@ function getAudioFileExtension(mimeType: string) {
   return "webm";
 }
 
+
+function formatTime(time: number) {
+  if (isNaN(time)) return "0:00";
+  const minutes = Math.floor(time / 60);
+  const seconds = Math.floor(time % 60);
+  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+}
+
+const AudioPlayer = memo(function AudioPlayer({ mediaUrl }: { mediaUrl: string }) {
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+
+  const togglePlay = useCallback(() => {
+    if (audioRef.current) {
+      if (isPlaying) audioRef.current.pause();
+      else audioRef.current.play();
+      setIsPlaying(!isPlaying);
+    }
+  }, [isPlaying]);
+
+  const onTimeUpdate = useCallback(() => {
+    if (audioRef.current) {
+      const current = audioRef.current.currentTime;
+      const total = audioRef.current.duration;
+      setCurrentTime(current);
+      setProgress((current / total) * 100);
+    }
+  }, []);
+
+  const onLoadedMetadata = useCallback(() => {
+    if (audioRef.current) setDuration(audioRef.current.duration);
+  }, []);
+
+  const handleSeek = useCallback((e: MouseEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const percentage = x / rect.width;
+    if (audioRef.current && audioRef.current.duration) {
+      audioRef.current.currentTime = percentage * audioRef.current.duration;
+    }
+  }, []);
+
+  return (
+    <div className="flex items-end gap-3 bg-(--chat-background)/40 p-2 rounded-xl min-w-[260px]">
+      <button onClick={togglePlay} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-(--chat-primary) text-white hover:scale-105 transition-transform">
+        {isPlaying ? <Pause size={20} fill="currentColor" /> : <PlayIcon size={20} className="ml-1" fill="currentColor" />}
+      </button>
+
+      <div className="flex flex-1 flex-col gap-1 pr-2">
+        <div className="relative h-2 w-full bg-(--chat-muted-foreground)/20 rounded-full cursor-pointer" onClick={handleSeek}>
+          <div className="absolute h-full bg-(--chat-primary) rounded-full" style={{ width: `${progress}%` }} />
+          <div className="absolute h-4 w-4 bg-(--chat-primary) rounded-full -top-1 shadow-sm" style={{ left: `calc(${progress}% - 6px)` }} />
+        </div>
+        <div className="flex justify-between text-[10px] text-(--chat-muted-foreground) font-medium">
+          <span>{formatTime(currentTime)}</span>
+          <span>{formatTime(duration)}</span>
+        </div>
+      </div>
+
+      <audio ref={audioRef} src={mediaUrl} onTimeUpdate={onTimeUpdate} onLoadedMetadata={onLoadedMetadata} onEnded={() => setIsPlaying(false)} className="hidden" />
+    </div>
+  );
+});
+
+const MessageBubble = memo(function MessageBubble({
+  message,
+  chat,
+  messagesByRemoteId,
+  selected,
+  isSelectionMode,
+  onToggleSelection,
+  onReply,
+  onForward,
+  onDelete,
+  onExpandImage,
+}: {
+  message: MessageRecord;
+  chat: ChatRecord;
+  messagesByRemoteId: Map<string, MessageRecord>;
+  selected: boolean;
+  isSelectionMode: boolean;
+  onToggleSelection: (m: MessageRecord) => void;
+  onReply: (m: MessageRecord) => void;
+  onForward: (m: MessageRecord) => void;
+  onDelete: (m: MessageRecord) => void;
+  onExpandImage: (url: string, alt: string) => void;
+}) {
+  const fromMe = !!message.from_me;
+  const mediaUrl = getMediaUrl(message);
+  const mediaKind = getMediaKind(message);
+  const hasCaption = !!message.content?.trim();
+  const deleted = isDeletedMessage(message);
+  const quotedInfo = getQuotedMessage(message);
+  const quotedOriginal = quotedInfo?.messageId ? messagesByRemoteId.get(quotedInfo.messageId) : null;
+  const quotedMessage = quotedOriginal
+    ? {
+        content: getMessagePreviewText(quotedOriginal),
+        fromMe: Boolean(quotedOriginal.from_me),
+      }
+    : quotedInfo;
+  const quotedKind = quotedOriginal ? getMediaKind(quotedOriginal) : null;
+
+  return (
+    <div className={cn("mb-2 flex items-center gap-2", fromMe ? "justify-end" : "justify-start")}>
+      {isSelectionMode && !deleted && (
+        <button
+          type="button"
+          className={cn(
+            "flex h-7 w-7 shrink-0 items-center justify-center rounded-full border transition-colors",
+            selected ? "border-teal-500 bg-teal-500 text-white" : "border-(--chat-muted-foreground)/40 bg-(--chat-card)/80 text-transparent hover:border-teal-500",
+          )}
+          onClick={() => onToggleSelection(message)}
+          aria-label={selected ? "Remover mensagem da selecao" : "Selecionar mensagem"}
+        >
+          <Check className="h-4 w-4" />
+        </button>
+      )}
+      <div
+        className={cn(
+          "group relative min-w-[168px] max-w-[72%] rounded-lg px-3 py-2 shadow-sm transition-colors sm:min-w-[196px]",
+          fromMe ? "rounded-tr-none bg-(--chat-me)" : "rounded-tl-none bg-(--chat-other)",
+          selected && "ring-2 ring-teal-500/70",
+          deleted && "border border-dashed border-red-500/45 bg-(--chat-muted)/80 opacity-80 shadow-none saturate-[0.65]",
+        )}
+      >
+        {message.participant && !fromMe && <p className="mb-1 text-sm font-medium text-(--chat-primary)">{message.participant}</p>}
+
+        {!deleted && (
+          <div className={cn("absolute top-1 flex rounded-full bg-(--chat-card)/90 p-0.5 opacity-0 shadow-sm transition-opacity group-hover:opacity-100", fromMe ? "right-full mr-2" : "left-full ml-2")}>
+            <Button type="button" variant="ghost" size="icon-sm" className="h-7 w-7 rounded-full text-muted-foreground hover:text-foreground" onClick={() => onReply(message)} aria-label="Responder mensagem">
+              <Reply className="h-4 w-4" />
+            </Button>
+            <Button type="button" variant="ghost" size="icon-sm" className="h-7 w-7 rounded-full text-muted-foreground hover:text-foreground" onClick={() => onForward(message)} aria-label="Encaminhar mensagem">
+              <Forward className="h-4 w-4" />
+            </Button>
+            <Button type="button" variant="ghost" size="icon-sm" className="h-7 w-7 rounded-full text-muted-foreground hover:text-foreground" onClick={() => onToggleSelection(message)} aria-label="Selecionar mensagem">
+              <CheckSquare className="h-4 w-4" />
+            </Button>
+            {fromMe && (
+              <Button type="button" variant="ghost" size="icon-sm" className="h-7 w-7 rounded-full text-muted-foreground hover:text-red-500" onClick={() => onDelete(message)} aria-label="Apagar mensagem">
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            )}
+          </div>
+        )}
+
+        {deleted && (
+          <div className="mb-2 flex items-center gap-2 rounded-md border border-red-500/25 bg-red-500/10 px-2.5 py-1.5 text-[11px] font-medium text-red-700 dark:text-red-300">
+            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-red-500/20">
+              <Trash2 className="h-3 w-3" />
+            </span>
+            <span className="min-w-0">
+              <span className="block leading-none">Mensagem apagada</span>
+              <span className="mt-0.5 block truncate text-[10px] font-normal text-(--chat-muted-foreground)">Conteudo preservado apenas para historico interno</span>
+            </span>
+          </div>
+        )}
+
+        <div className={cn(deleted && "rounded-md bg-(--chat-background)/20 p-2 opacity-70")}>
+          {quotedMessage && (
+            <div
+              className={cn(
+                "mb-2 overflow-hidden rounded-md border-l-4 px-2.5 py-2 shadow-[inset_0_0_0_1px_rgba(17,27,33,0.035)]",
+                fromMe ? "bg-[#c8f4c2] dark:bg-[#0f3f2d]" : "bg-[#f5f6f6] dark:bg-[#1d292f]",
+                quotedMessage.fromMe ? "border-l-[#00a884]" : "border-l-[#53bdeb]",
+              )}
+            >
+              <div className="mb-0.5 flex min-w-0 items-center gap-1.5">
+                <p className={cn("truncate text-[12px] font-semibold", quotedMessage.fromMe ? "text-[#008069] dark:text-[#06cf9c]" : "text-[#3b82c4] dark:text-[#53bdeb]")}>
+                  {quotedMessage.fromMe ? "Voce" : getDisplayName(chat)}
+                </p>
+              </div>
+              <div className="flex min-w-0 items-center gap-1.5 text-(--chat-muted-foreground)">
+                {quotedKind === "image" && <FileImage className="h-3.5 w-3.5 shrink-0 opacity-75" />}
+                {quotedKind === "video" && <Video className="h-3.5 w-3.5 shrink-0 opacity-75" />}
+                {quotedKind === "audio" && <Mic className="h-3.5 w-3.5 shrink-0 opacity-75" />}
+                {quotedKind === "file" && <FileText className="h-3.5 w-3.5 shrink-0 opacity-75" />}
+                <p className="line-clamp-2 min-w-0 text-[12px] leading-snug">{quotedMessage.content}</p>
+              </div>
+            </div>
+          )}
+
+          {mediaUrl ? (
+            <div className="flex max-w-full flex-col gap-2">
+            {mediaKind === "image" && (
+              <button
+                type="button"
+                onClick={() => onExpandImage(mediaUrl, message.content || "Imagem")}
+                className="relative block aspect-[4/3] w-[min(320px,64vw)] max-w-full overflow-hidden rounded-md bg-(--chat-background)/40"
+                aria-label="Expandir imagem"
+              >
+                <Image src={mediaUrl} alt={message.content || "Imagem"} fill sizes="(max-width: 640px) 64vw, 320px" className="object-contain" loading="lazy" />
+              </button>
+            )}
+
+            {mediaKind === "sticker" && (
+              <div className="block w-fit">
+                <Image src={mediaUrl} alt={message.content || "Figurinha"} width={128} height={128} className="h-32 w-32 rounded-md object-contain" loading="lazy" />
+              </div>
+            )}
+
+            {mediaKind === "video" && (
+              <div className="aspect-video w-[min(320px,64vw)] max-w-full overflow-hidden rounded-md bg-black">
+                <video src={mediaUrl} className="h-full w-full object-contain" controls preload="metadata" />
+              </div>
+            )}
+
+            {mediaKind === "audio" && (
+              <AudioPlayer mediaUrl={mediaUrl} />
+            )}
+
+            {mediaKind === "file" && (
+              <div className="flex items-center gap-3 rounded-lg bg-(--chat-background)/30 p-3">
+                <FileText className="h-8 w-8 shrink-0 text-(--chat-muted-foreground)" />
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium text-(--chat-foreground)">{getFileName(message, mediaUrl)}</p>
+                  <p className="truncate text-xs text-(--chat-muted-foreground)">{message.media_mime_type || message.message_type || "Arquivo"}</p>
+                </div>
+              </div>
+            )}
+
+            {hasCaption && <p className="whitespace-pre-wrap break-words text-sm text-(--chat-foreground)">{message.content}</p>}
+
+            {mediaKind !== "sticker" && (
+              <div className="flex gap-2">
+                <a
+                  href={mediaUrl}
+                  download
+                  className="flex flex-1 items-center justify-center gap-2 rounded bg-(--chat-card)/80 py-2 text-xs font-medium text-(--chat-muted-foreground) transition-colors hover:bg-(--chat-card)"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  Baixar Arquivo
+                </a>
+              </div>
+            )}
+            </div>
+          ) : (
+            <p className="whitespace-pre-wrap break-words text-sm text-(--chat-foreground)">{getMessageText(message)}</p>
+          )}
+        </div>
+
+        <div className="mt-1 flex items-center justify-end gap-1 text-[10px] text-(--chat-muted-foreground) opacity-70">
+          <span>{getTimeLabel(message.timestamp_msg)}</span>
+          <MessageStatusIcon
+            fromMe={message.from_me}
+            status={message.status}
+            timestamp={message.timestamp_msg}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}, (prevProps: any, nextProps: any) => {
+  return prevProps.message === nextProps.message &&
+    prevProps.selected === nextProps.selected &&
+    prevProps.isSelectionMode === nextProps.isSelectionMode &&
+    prevProps.chat === nextProps.chat;
+});
+
 export function ChatWindow({
   chat,
   messages,
@@ -267,51 +529,6 @@ export function ChatWindow({
   const recordingTimerRef = useRef<number | null>(null);
   const shouldSendRecordingRef = useRef(false);
   const recordingPausedRef = useRef(false);
-
-  //audio
-  const audioRef = useRef<HTMLAudioElement>(null);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(0);
-
-  const togglePlay = () => {
-    if (audioRef.current) {
-      if (isPlaying) audioRef.current.pause();
-      else audioRef.current.play();
-      setIsPlaying(!isPlaying);
-    }
-  };
-
-  const onTimeUpdate = () => {
-    if (audioRef.current) {
-      const current = audioRef.current.currentTime;
-      const total = audioRef.current.duration;
-      setCurrentTime(current);
-      setProgress((current / total) * 100);
-    }
-  };
-
-  const onLoadedMetadata = () => {
-    if (audioRef.current) setDuration(audioRef.current.duration);
-  };
-
-  const formatTime = (time: number) => {
-    const minutes = Math.floor(time / 60);
-    const seconds = Math.floor(time % 60);
-    return `${minutes}:${seconds.toString().padStart(2, "0")}`;
-  };
-
-  const handleSeek = (e: MouseEvent<HTMLDivElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const percentage = x / rect.width;
-    if (audioRef.current) {
-      audioRef.current.currentTime = percentage * audioRef.current.duration;
-    }
-  };
-
-  // audio ^^^^^^
 
   const groupedMessages = useMemo(() => {
     return messages.reduce<Array<{ date: string; items: MessageRecord[] }>>((groups, message) => {
@@ -903,191 +1120,21 @@ export function ChatWindow({
                       <span className="rounded bg-(--chat-muted)/80 px-3 py-1 text-xs text-(--chat-muted-foreground) shadow-sm">{group.date}</span>
                     </div>
 
-                    {group.items.map((message) => {
-                      const fromMe = !!message.from_me;
-                      const mediaUrl = getMediaUrl(message);
-                      const mediaKind = getMediaKind(message);
-                      const hasCaption = !!message.content?.trim();
-                      const deleted = isDeletedMessage(message);
-                      const selected = selectedMessageIds.has(message.id);
-                      const quotedInfo = getQuotedMessage(message);
-                      const quotedOriginal = quotedInfo?.messageId ? messagesByRemoteId.get(quotedInfo.messageId) : null;
-                      const quotedMessage = quotedOriginal
-                        ? {
-                            content: getMessagePreviewText(quotedOriginal),
-                            fromMe: Boolean(quotedOriginal.from_me),
-                          }
-                        : quotedInfo;
-                      const quotedKind = quotedOriginal ? getMediaKind(quotedOriginal) : null;
-
-                      return (
-                        <div key={message.id} className={cn("mb-2 flex items-center gap-2", fromMe ? "justify-end" : "justify-start")}>
-                          {isSelectionMode && !deleted && (
-                            <button
-                              type="button"
-                              className={cn(
-                                "flex h-7 w-7 shrink-0 items-center justify-center rounded-full border transition-colors",
-                                selected ? "border-teal-500 bg-teal-500 text-white" : "border-(--chat-muted-foreground)/40 bg-(--chat-card)/80 text-transparent hover:border-teal-500",
-                              )}
-                              onClick={() => toggleMessageSelection(message)}
-                              aria-label={selected ? "Remover mensagem da selecao" : "Selecionar mensagem"}
-                            >
-                              <Check className="h-4 w-4" />
-                            </button>
-                          )}
-                          <div
-                            className={cn(
-                              "group relative min-w-[168px] max-w-[72%] rounded-lg px-3 py-2 shadow-sm transition-colors sm:min-w-[196px]",
-                              fromMe ? "rounded-tr-none bg-(--chat-me)" : "rounded-tl-none bg-(--chat-other)",
-                              selected && "ring-2 ring-teal-500/70",
-                              deleted && "border border-dashed border-red-500/45 bg-(--chat-muted)/80 opacity-80 shadow-none saturate-[0.65]",
-                            )}
-                          >
-                            {message.participant && !fromMe && <p className="mb-1 text-sm font-medium text-(--chat-primary)">{message.participant}</p>}
-
-                            {!deleted && (
-                              <div className={cn("absolute top-1 flex rounded-full bg-(--chat-card)/90 p-0.5 opacity-0 shadow-sm transition-opacity group-hover:opacity-100", fromMe ? "right-full mr-2" : "left-full ml-2")}>
-                                <Button type="button" variant="ghost" size="icon-sm" className="h-7 w-7 rounded-full text-muted-foreground hover:text-foreground" onClick={() => beginReply(message)} aria-label="Responder mensagem">
-                                  <Reply className="h-4 w-4" />
-                                </Button>
-                                <Button type="button" variant="ghost" size="icon-sm" className="h-7 w-7 rounded-full text-muted-foreground hover:text-foreground" onClick={() => beginForward(message)} aria-label="Encaminhar mensagem">
-                                  <Forward className="h-4 w-4" />
-                                </Button>
-                                <Button type="button" variant="ghost" size="icon-sm" className="h-7 w-7 rounded-full text-muted-foreground hover:text-foreground" onClick={() => toggleMessageSelection(message)} aria-label="Selecionar mensagem">
-                                  <CheckSquare className="h-4 w-4" />
-                                </Button>
-                                {fromMe && (
-                                  <Button type="button" variant="ghost" size="icon-sm" className="h-7 w-7 rounded-full text-muted-foreground hover:text-red-500" onClick={() => beginDelete(message)} aria-label="Apagar mensagem">
-                                    <Trash2 className="h-4 w-4" />
-                                  </Button>
-                                )}
-                              </div>
-                            )}
-
-                            {deleted && (
-                              <div className="mb-2 flex items-center gap-2 rounded-md border border-red-500/25 bg-red-500/10 px-2.5 py-1.5 text-[11px] font-medium text-red-700 dark:text-red-300">
-                                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-red-500/20">
-                                  <Trash2 className="h-3 w-3" />
-                                </span>
-                                <span className="min-w-0">
-                                  <span className="block leading-none">Mensagem apagada</span>
-                                  <span className="mt-0.5 block truncate text-[10px] font-normal text-(--chat-muted-foreground)">Conteudo preservado apenas para historico interno</span>
-                                </span>
-                              </div>
-                            )}
-
-                            <div className={cn(deleted && "rounded-md bg-(--chat-background)/20 p-2 opacity-70")}>
-                              {quotedMessage && (
-                                <div
-                                  className={cn(
-                                    "mb-2 overflow-hidden rounded-md border-l-4 px-2.5 py-2 shadow-[inset_0_0_0_1px_rgba(17,27,33,0.035)]",
-                                    fromMe ? "bg-[#c8f4c2] dark:bg-[#0f3f2d]" : "bg-[#f5f6f6] dark:bg-[#1d292f]",
-                                    quotedMessage.fromMe ? "border-l-[#00a884]" : "border-l-[#53bdeb]",
-                                  )}
-                                >
-                                  <div className="mb-0.5 flex min-w-0 items-center gap-1.5">
-                                    <p className={cn("truncate text-[12px] font-semibold", quotedMessage.fromMe ? "text-[#008069] dark:text-[#06cf9c]" : "text-[#3b82c4] dark:text-[#53bdeb]")}>
-                                      {quotedMessage.fromMe ? "Voce" : getDisplayName(chat)}
-                                    </p>
-                                  </div>
-                                  <div className="flex min-w-0 items-center gap-1.5 text-(--chat-muted-foreground)">
-                                    {quotedKind === "image" && <FileImage className="h-3.5 w-3.5 shrink-0 opacity-75" />}
-                                    {quotedKind === "video" && <Video className="h-3.5 w-3.5 shrink-0 opacity-75" />}
-                                    {quotedKind === "audio" && <Mic className="h-3.5 w-3.5 shrink-0 opacity-75" />}
-                                    {quotedKind === "file" && <FileText className="h-3.5 w-3.5 shrink-0 opacity-75" />}
-                                    <p className="line-clamp-2 min-w-0 text-[12px] leading-snug">{quotedMessage.content}</p>
-                                  </div>
-                                </div>
-                              )}
-
-                              {mediaUrl ? (
-                                <div className="flex max-w-full flex-col gap-2">
-                                {mediaKind === "image" && (
-                                  <button
-                                    type="button"
-                                    onClick={() => setExpandedImage({ url: mediaUrl, alt: message.content || "Imagem" })}
-                                    className="relative block aspect-[4/3] w-[min(320px,64vw)] max-w-full overflow-hidden rounded-md bg-(--chat-background)/40"
-                                    aria-label="Expandir imagem"
-                                  >
-                                    <Image src={mediaUrl} alt={message.content || "Imagem"} fill sizes="(max-width: 640px) 64vw, 320px" className="object-contain" loading="lazy" unoptimized />
-                                  </button>
-                                )}
-
-                                {mediaKind === "sticker" && (
-                                  <div className="block w-fit">
-                                    <Image src={mediaUrl} alt={message.content || "Figurinha"} width={128} height={128} className="h-32 w-32 rounded-md object-contain" loading="lazy" unoptimized />
-                                  </div>
-                                )}
-
-                                {mediaKind === "video" && (
-                                  <div className="aspect-video w-[min(320px,64vw)] max-w-full overflow-hidden rounded-md bg-black">
-                                    <video src={mediaUrl} className="h-full w-full object-contain" controls preload="metadata" />
-                                  </div>
-                                )}
-
-                                {mediaKind === "audio" && (
-                                  <div className="flex items-end gap-3 bg-(--chat-background)/40 p-2 rounded-xl min-w-[260px]">
-                                    <button onClick={togglePlay} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-(--chat-primary) text-white hover:scale-105 transition-transform">
-                                      {isPlaying ? <Pause size={20} fill="currentColor" /> : <PlayIcon size={20} className="ml-1" fill="currentColor" />}
-                                    </button>
-
-                                    <div className="flex flex-1 flex-col gap-1 pr-2">
-                                      <div className="relative h-2 w-full bg-(--chat-muted-foreground)/20 rounded-full cursor-pointer" onClick={handleSeek}>
-                                        <div className="absolute h-full bg-(--chat-primary) rounded-full" style={{ width: `${progress}%` }} />
-                                        <div className="absolute h-4 w-4 bg-(--chat-primary) rounded-full -top-1 shadow-sm" style={{ left: `calc(${progress}% - 6px)` }} />
-                                      </div>
-                                      <div className="flex justify-between text-[10px] text-(--chat-muted-foreground) font-medium">
-                                        <span>{formatTime(currentTime)}</span>
-                                        <span>{formatTime(duration)}</span>
-                                      </div>
-                                    </div>
-
-                                    <audio ref={audioRef} src={mediaUrl} onTimeUpdate={onTimeUpdate} onLoadedMetadata={onLoadedMetadata} onEnded={() => setIsPlaying(false)} className="hidden" />
-                                  </div>
-                                )}
-
-                                {mediaKind === "file" && (
-                                  <div className="flex items-center gap-3 rounded-lg bg-(--chat-background)/30 p-3">
-                                    <FileText className="h-8 w-8 shrink-0 text-(--chat-muted-foreground)" />
-                                    <div className="min-w-0">
-                                      <p className="truncate text-sm font-medium text-(--chat-foreground)">{getFileName(message, mediaUrl)}</p>
-                                      <p className="truncate text-xs text-(--chat-muted-foreground)">{message.media_mime_type || message.message_type || "Arquivo"}</p>
-                                    </div>
-                                  </div>
-                                )}
-
-                                {hasCaption && <p className="whitespace-pre-wrap break-words text-sm text-(--chat-foreground)">{message.content}</p>}
-
-                                {mediaKind !== "sticker" && (
-                                  <div className="flex gap-2">
-                                    <a
-                                      href={mediaUrl}
-                                      download
-                                      className="flex flex-1 items-center justify-center gap-2 rounded bg-(--chat-card)/80 py-2 text-xs font-medium text-(--chat-muted-foreground) transition-colors hover:bg-(--chat-card)"
-                                    >
-                                      <Download className="h-3.5 w-3.5" />
-                                      Baixar Arquivo
-                                    </a>
-                                  </div>
-                                )}
-                                </div>
-                              ) : (
-                                <p className="whitespace-pre-wrap break-words text-sm text-(--chat-foreground)">{getMessageText(message)}</p>
-                              )}
-                            </div>
-
-                            <div className="mt-1 flex items-center justify-end gap-1 text-[10px] text-(--chat-muted-foreground) opacity-70">
-                              <span>{getTimeLabel(message.timestamp_msg)}</span>
-                              <MessageStatusIcon
-                                fromMe={message.from_me}
-                                status={message.status}
-                                timestamp={message.timestamp_msg}
-                              />
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
+                                        {group.items.map((message) => (
+                      <MessageBubble
+                        key={message.id}
+                        message={message}
+                        chat={chat!}
+                        messagesByRemoteId={messagesByRemoteId}
+                        selected={selectedMessageIds.has(message.id)}
+                        isSelectionMode={isSelectionMode}
+                        onToggleSelection={toggleMessageSelection}
+                        onReply={beginReply}
+                        onForward={beginForward}
+                        onDelete={beginDelete}
+                        onExpandImage={(url: string, alt: string) => setExpandedImage({ url, alt })}
+                      />
+                    ))}
                   </div>
                 ))}
               </>

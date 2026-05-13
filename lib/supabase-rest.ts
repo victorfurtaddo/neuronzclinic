@@ -193,7 +193,7 @@ export function fetchMessages(chatId: string, { limit = 50, offset = 0 }: Pagina
   )
 }
 
-export function fetchLatestMessageStatuses(chatIds: string[]) {
+export function fetchLatestMessageStatuses(chatIds: string[]): Promise<Record<string, LatestMessageStatus>> {
   const uniqueChatIds = Array.from(new Set(chatIds.filter(Boolean)))
 
   if (uniqueChatIds.length === 0) {
@@ -205,7 +205,7 @@ export function fetchLatestMessageStatuses(chatIds: string[]) {
   const limit = Math.max(uniqueChatIds.length * 20, 1000)
 
   return supabaseGet<LatestMessageStatusRecord[]>(
-    `messages?select=${select}&chat_id=in.(${encodedIds})&order=timestamp_msg.desc.nullslast&limit=${limit}`,
+    `messages?select=${select}&chat_id=in.(${encodedIds})&from_me=is.true&order=timestamp_msg.desc.nullslast&limit=${limit}`,
   ).then((messages) => {
     const initialStatuses = Object.fromEntries(
       uniqueChatIds.map((chatId) => [chatId, { status: null, timestamp_msg: null }]),

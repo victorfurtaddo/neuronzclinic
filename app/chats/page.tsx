@@ -57,12 +57,26 @@ function isMatchingSentMessage(message: MessageRecord, optimisticMessage: Messag
   return message.content?.trim() === optimisticMessage.content?.trim()
 }
 
+function hasFreshLatestStatus(chat: ChatRecord, latestStatus?: LatestMessageStatus) {
+  if (!latestStatus) return false
+  if (!chat.last_message_time) return true
+  if (!latestStatus.timestamp_msg) return false
+
+  const chatMessageTime = Date.parse(chat.last_message_time)
+  const statusMessageTime = Date.parse(latestStatus.timestamp_msg)
+
+  if (!Number.isFinite(chatMessageTime) || !Number.isFinite(statusMessageTime)) {
+    return latestStatus.timestamp_msg === chat.last_message_time
+  }
+
+  return statusMessageTime >= chatMessageTime - 5000
+}
+
 export default function ChatsPage() {
   const [chats, setChats] = useState<ChatRecord[]>([])
   const [searchChats, setSearchChats] = useState<ChatRecord[]>([])
-  const [messages, setMessages] = useState<MessageRecord[]>([])
+  const [messagesByChatId, setMessagesByChatId] = useState<Record<string, MessageRecord[]>>({})
   const [latestMessageStatuses, setLatestMessageStatuses] = useState<Record<string, LatestMessageStatus>>({})
-  const [messagesChatId, setMessagesChatId] = useState<string>()
   const [selectedChatId, setSelectedChatId] = useState<string>()
   const [search, setSearch] = useState("")
   const [debouncedSearch, setDebouncedSearch] = useState("")
@@ -73,17 +87,26 @@ export default function ChatsPage() {
   const [hasMoreChats, setHasMoreChats] = useState(true)
   const [hasMoreSearchChats, setHasMoreSearchChats] = useState(false)
   const [isLoadingOlderMessages, setIsLoadingOlderMessages] = useState(false)
-  const [hasMoreMessages, setHasMoreMessages] = useState(false)
+  const [hasMoreMessagesByChatId, setHasMoreMessagesByChatId] = useState<Record<string, boolean>>({})
   const [error, setError] = useState<string>()
 
   const isSearching = !!debouncedSearch.trim()
   const isSearchingChats = isSearching && searchChatsTerm !== debouncedSearch.trim()
   const visibleChats = isSearching ? searchChats : chats
+  const knownChats = useMemo(() => {
+    const indexedChats = new Map<string, ChatRecord>()
+    for (const chat of [...chats, ...searchChats]) indexedChats.set(chat.id, chat)
+    return Array.from(indexedChats.values())
+  }, [chats, searchChats])
   const selectedChat = useMemo(
-    () => visibleChats.find((chat) => chat.id === selectedChatId),
-    [selectedChatId, visibleChats],
+    () => knownChats.find((chat) => chat.id === selectedChatId),
+    [knownChats, selectedChatId],
   )
   const selectedChatRemoteId = selectedChat?.chat_id
+  const messages = selectedChatRemoteId ? messagesByChatId[selectedChatRemoteId] ?? [] : []
+  const hasMoreMessages = selectedChatRemoteId ? hasMoreMessagesByChatId[selectedChatRemoteId] ?? false : false
+  const hasLoadedSelectedMessages = !!selectedChatRemoteId && selectedChatRemoteId in messagesByChatId
+  const isLoadingSelectedMessages = !!selectedChatRemoteId && !hasLoadedSelectedMessages
   const selectedChatRemoteIdRef = useRef<string | undefined>(undefined)
 
   useEffect(() => {
@@ -142,25 +165,40 @@ export default function ChatsPage() {
     searchChats.length,
   ])
 
+  const setChatHasMoreMessages = useCallback((chatId: string, hasMore: boolean) => {
+    setHasMoreMessagesByChatId((current) => ({
+      ...current,
+      [chatId]: hasMore,
+    }))
+  }, [])
+
   const loadOlderMessages = useCallback(async () => {
     if (!selectedChatRemoteId || isLoadingOlderMessages || !hasMoreMessages) return 0
 
     setIsLoadingOlderMessages(true)
+    const currentMessages = messagesByChatId[selectedChatRemoteId] ?? []
 
     try {
       const data = await fetchMessages(selectedChatRemoteId, {
         limit: MESSAGE_PAGE_SIZE,
-        offset: messages.length,
+        offset: currentMessages.length,
       })
       const olderMessages = [...data].reverse()
-      const knownIds = new Set(messages.map((message) => message.id))
+      const knownIds = new Set(currentMessages.map((message) => message.id))
       const newMessages = olderMessages.filter((message) => !knownIds.has(message.id))
 
-      setMessages((current) => {
-        const currentIds = new Set(current.map((message) => message.id))
-        return [...olderMessages.filter((message) => !currentIds.has(message.id)), ...current]
+      setMessagesByChatId((current) => {
+        const currentChatMessages = current[selectedChatRemoteId] ?? []
+        const currentIds = new Set(currentChatMessages.map((message) => message.id))
+        return {
+          ...current,
+          [selectedChatRemoteId]: [
+            ...olderMessages.filter((message) => !currentIds.has(message.id)),
+            ...currentChatMessages,
+          ],
+        }
       })
-      setHasMoreMessages(data.length === MESSAGE_PAGE_SIZE)
+      setChatHasMoreMessages(selectedChatRemoteId, data.length === MESSAGE_PAGE_SIZE)
       return newMessages.length
     } catch (err) {
       setError(err instanceof Error ? err.message : "Nao foi possivel carregar mensagens antigas.")
@@ -168,26 +206,68 @@ export default function ChatsPage() {
     } finally {
       setIsLoadingOlderMessages(false)
     }
-  }, [hasMoreMessages, isLoadingOlderMessages, messages, selectedChatRemoteId])
+  }, [hasMoreMessages, isLoadingOlderMessages, messagesByChatId, selectedChatRemoteId, setChatHasMoreMessages])
+
+  const replaceChatMessages = useCallback((chatId: string, nextMessages: MessageRecord[]) => {
+    setMessagesByChatId((current) => ({
+      ...current,
+      [chatId]: nextMessages,
+    }))
+  }, [])
+
+  const updateLatestMessageStatus = useCallback((chatId: string, freshMessages: MessageRecord[]) => {
+    const latestMessage = freshMessages[freshMessages.length - 1]
+
+    setLatestMessageStatuses((current) => ({
+      ...current,
+      [chatId]: {
+        status: latestMessage?.status ?? null,
+        timestamp_msg: latestMessage?.timestamp_msg ?? null,
+      },
+    }))
+  }, [])
+
+  const appendChatMessage = useCallback((chatId: string, message: MessageRecord) => {
+    setMessagesByChatId((current) => ({
+      ...current,
+      [chatId]: [...(current[chatId] ?? []), message],
+    }))
+  }, [])
+
+  const updateChatMessages = useCallback((chatId: string, updater: (messages: MessageRecord[]) => MessageRecord[]) => {
+    setMessagesByChatId((current) => ({
+      ...current,
+      [chatId]: updater(current[chatId] ?? []),
+    }))
+  }, [])
 
   const refreshMessagesAfterSend = useCallback(
     async (chatId: string, optimisticId: string) => {
       const data = await fetchMessages(chatId, { limit: MESSAGE_PAGE_SIZE, offset: 0 })
       const freshMessages = [...data].reverse()
 
+      updateLatestMessageStatus(chatId, freshMessages)
+
       if (selectedChatRemoteIdRef.current !== chatId) return
 
-      setMessages((current) => {
-        const optimisticMessage = current.find((message) => message.id === optimisticId)
-        if (!optimisticMessage) return freshMessages
+      setMessagesByChatId((current) => {
+        const currentMessages = current[chatId] ?? []
+        const optimisticMessage = currentMessages.find((message) => message.id === optimisticId)
+        const nextMessages = (() => {
+          if (!optimisticMessage) return freshMessages
 
-        const hasRealMessage = freshMessages.some((message) => isMatchingSentMessage(message, optimisticMessage))
-        return hasRealMessage ? freshMessages : [...freshMessages, { ...optimisticMessage, status: "sent" }]
+          const hasRealMessage = freshMessages.some((message) => isMatchingSentMessage(message, optimisticMessage))
+          return hasRealMessage ? freshMessages : [...freshMessages, { ...optimisticMessage, status: "sent" }]
+        })()
+
+        return {
+          ...current,
+          [chatId]: nextMessages,
+        }
       })
-      setMessagesChatId(chatId)
-      setHasMoreMessages(data.length === MESSAGE_PAGE_SIZE)
+      setChatHasMoreMessages(chatId, data.length === MESSAGE_PAGE_SIZE)
     },
-    [],
+    [setChatHasMoreMessages, updateLatestMessageStatus],
   )
 
   const handleSendMessage = useCallback(
@@ -214,7 +294,7 @@ export default function ChatsPage() {
         status: "sending",
       }
 
-      setMessages((current) => [...current, optimisticMessage])
+      appendChatMessage(selectedChatRemoteId, optimisticMessage)
       setError(undefined)
 
       try {
@@ -223,7 +303,7 @@ export default function ChatsPage() {
         window.setTimeout(() => void refreshMessagesAfterSend(selectedChatRemoteId, optimisticId), 2500)
         window.setTimeout(() => void refreshMessagesAfterSend(selectedChatRemoteId, optimisticId), 7000)
       } catch (err) {
-        setMessages((current) =>
+        updateChatMessages(selectedChatRemoteId, (current) =>
           current.map((message) => (message.id === optimisticId ? { ...message, status: "error" } : message)),
         )
         setError(err instanceof Error ? err.message : "Nao foi possivel enviar a mensagem.")
@@ -234,7 +314,7 @@ export default function ChatsPage() {
         }
       }
     },
-    [refreshMessagesAfterSend, selectedChatRemoteId],
+    [appendChatMessage, refreshMessagesAfterSend, selectedChatRemoteId, updateChatMessages],
   )
 
   const handleReplyMessage = useCallback(
@@ -265,7 +345,7 @@ export default function ChatsPage() {
         quoted_message_type: replyTo.message_type,
       }
 
-      setMessages((current) => [...current, optimisticMessage])
+      appendChatMessage(selectedChatRemoteId, optimisticMessage)
       setError(undefined)
 
       try {
@@ -274,7 +354,7 @@ export default function ChatsPage() {
         window.setTimeout(() => void refreshMessagesAfterSend(selectedChatRemoteId, optimisticId), 2500)
         window.setTimeout(() => void refreshMessagesAfterSend(selectedChatRemoteId, optimisticId), 7000)
       } catch (err) {
-        setMessages((current) =>
+        updateChatMessages(selectedChatRemoteId, (current) =>
           current.map((message) => (message.id === optimisticId ? { ...message, status: "error" } : message)),
         )
         setError(err instanceof Error ? err.message : "Nao foi possivel responder a mensagem.")
@@ -285,7 +365,7 @@ export default function ChatsPage() {
         }
       }
     },
-    [refreshMessagesAfterSend, selectedChatRemoteId],
+    [appendChatMessage, refreshMessagesAfterSend, selectedChatRemoteId, updateChatMessages],
   )
 
   const handleForwardMessage = useCallback(
@@ -314,8 +394,8 @@ export default function ChatsPage() {
     async (message: MessageRecord) => {
       if (!selectedChatRemoteId) return
 
-      const previousMessages = messages
-      setMessages((current) =>
+      const previousMessages = messagesByChatId[selectedChatRemoteId] ?? []
+      updateChatMessages(selectedChatRemoteId, (current) =>
         current.map((currentMessage) =>
           currentMessage.id === message.id
             ? {
@@ -330,12 +410,12 @@ export default function ChatsPage() {
       try {
         await deleteMessage({ chatId: selectedChatRemoteId, message })
       } catch (err) {
-        setMessages(previousMessages)
+        replaceChatMessages(selectedChatRemoteId, previousMessages)
         setError(err instanceof Error ? err.message : "Nao foi possivel apagar a mensagem.")
         throw err
       }
     },
-    [messages, selectedChatRemoteId],
+    [messagesByChatId, replaceChatMessages, selectedChatRemoteId, updateChatMessages],
   )
 
   const handleDeleteMessages = useCallback(
@@ -343,8 +423,8 @@ export default function ChatsPage() {
       if (!selectedChatRemoteId || messagesToDelete.length === 0) return
 
       const idsToDelete = new Set(messagesToDelete.map((message) => message.id))
-      const previousMessages = messages
-      setMessages((current) =>
+      const previousMessages = messagesByChatId[selectedChatRemoteId] ?? []
+      updateChatMessages(selectedChatRemoteId, (current) =>
         current.map((currentMessage) =>
           idsToDelete.has(currentMessage.id)
             ? {
@@ -359,12 +439,12 @@ export default function ChatsPage() {
       try {
         await deleteMessages({ chatId: selectedChatRemoteId, messages: messagesToDelete })
       } catch (err) {
-        setMessages(previousMessages)
+        replaceChatMessages(selectedChatRemoteId, previousMessages)
         setError(err instanceof Error ? err.message : "Nao foi possivel apagar as mensagens.")
         throw err
       }
     },
-    [messages, selectedChatRemoteId],
+    [messagesByChatId, replaceChatMessages, selectedChatRemoteId, updateChatMessages],
   )
 
   useEffect(() => {
@@ -411,7 +491,6 @@ export default function ChatsPage() {
         if (!isMounted) return
         setSearchChats(data)
         setSearchChatsTerm(term)
-        setSelectedChatId((current) => (data.some((chat) => chat.id === current) ? current : undefined))
         setHasMoreSearchChats(data.length === CHAT_PAGE_SIZE)
       })
       .catch((err) => {
@@ -437,27 +516,27 @@ export default function ChatsPage() {
     fetchMessages(selectedChatRemoteId, { limit: MESSAGE_PAGE_SIZE, offset: 0 })
       .then((data) => {
         if (!isMounted) return
-        setMessages([...data].reverse())
-        setMessagesChatId(selectedChatRemoteId)
-        setHasMoreMessages(data.length === MESSAGE_PAGE_SIZE)
+        const freshMessages = [...data].reverse()
+        replaceChatMessages(selectedChatRemoteId, freshMessages)
+        updateLatestMessageStatus(selectedChatRemoteId, freshMessages)
+        setChatHasMoreMessages(selectedChatRemoteId, data.length === MESSAGE_PAGE_SIZE)
       })
       .catch((err) => {
         if (!isMounted) return
-        setMessages([])
-        setMessagesChatId(selectedChatRemoteId)
-        setHasMoreMessages(false)
+        replaceChatMessages(selectedChatRemoteId, [])
+        setChatHasMoreMessages(selectedChatRemoteId, false)
         setError(err instanceof Error ? err.message : "Nao foi possivel carregar as mensagens.")
       })
 
     return () => {
       isMounted = false
     }
-  }, [selectedChatRemoteId])
+  }, [replaceChatMessages, selectedChatRemoteId, setChatHasMoreMessages, updateLatestMessageStatus])
 
   useEffect(() => {
-    const chatIds = visibleChats
-      .map((chat) => chat.chat_id)
-      .filter((chatId) => !(chatId in latestMessageStatuses))
+    const chatsNeedingStatus = visibleChats
+      .filter((chat) => chat.last_message_fromMe && !hasFreshLatestStatus(chat, latestMessageStatuses[chat.chat_id]))
+    const chatIds = chatsNeedingStatus.map((chat) => chat.chat_id)
 
     if (chatIds.length === 0) return
 
@@ -466,7 +545,19 @@ export default function ChatsPage() {
     fetchLatestMessageStatuses(chatIds)
       .then((statuses) => {
         if (!isMounted) return
-        setLatestMessageStatuses((current) => ({ ...current, ...statuses }))
+        const statusesWithFallbacks: Record<string, LatestMessageStatus> = Object.fromEntries(
+          chatsNeedingStatus.map((chat) => {
+            const status = statuses[chat.chat_id]
+            return [
+              chat.chat_id,
+              {
+                status: status?.status ?? null,
+                timestamp_msg: status?.timestamp_msg ?? chat.last_message_time,
+              },
+            ]
+          }),
+        )
+        setLatestMessageStatuses((current) => ({ ...current, ...statusesWithFallbacks }))
       })
       .catch((err) => {
         if (!isMounted) return
@@ -495,8 +586,8 @@ export default function ChatsPage() {
       />
       <ChatWindow
         chat={selectedChat}
-        messages={selectedChatRemoteId ? messages : []}
-        isLoading={!!selectedChat?.chat_id && messagesChatId !== selectedChat.chat_id}
+        messages={messages}
+        isLoading={isLoadingSelectedMessages}
         isLoadingOlder={isLoadingOlderMessages}
         hasMoreMessages={!!selectedChatRemoteId && hasMoreMessages}
         onLoadOlderMessages={loadOlderMessages}
