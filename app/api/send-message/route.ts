@@ -78,6 +78,10 @@ export async function POST(request: NextRequest) {
     const formData = await request.formData()
     const chatId = String(formData.get("chat_id") || "").trim()
     const text = String(formData.get("text") || "").trim()
+    const replyToMessageId = String(formData.get("reply_to_message_id") || "").trim()
+    const replyToContent = String(formData.get("reply_to_content") || "").trim()
+    const replyToType = String(formData.get("reply_to_type") || "").trim()
+    const replyToFromMe = String(formData.get("reply_to_from_me") || "").trim()
     const file = formData.get("file")
     const attachment = file instanceof File && file.size > 0 ? file : null
 
@@ -90,6 +94,17 @@ export async function POST(request: NextRequest) {
     }
 
     const uploaded = attachment ? await uploadFile(attachment, chatId) : null
+    const replyPayload = replyToMessageId
+      ? {
+          reply_to: {
+            message_id: replyToMessageId,
+            content: replyToContent,
+            type: replyToType,
+            from_me: replyToFromMe === "true",
+          },
+        }
+      : {}
+
     const payload = uploaded
       ? {
           type: uploaded.mediaType,
@@ -98,12 +113,14 @@ export async function POST(request: NextRequest) {
           filename: uploaded.fileName,
           media_url: uploaded.mediaUrl,
           media_mime_type: uploaded.mimeType,
+          ...replyPayload,
         }
       : {
           type: "text",
           chat_id: chatId,
           text,
           content: text,
+          ...replyPayload,
         }
 
     const webhookResponse = await fetch(WEBHOOK_URL, {

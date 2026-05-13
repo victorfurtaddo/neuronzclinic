@@ -3,7 +3,7 @@
 import Image from "next/image";
 import type { FormEvent, MouseEvent, UIEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Camera, Download, FileImage, FileText, MapPin, Mic, MoreHorizontal, Paperclip, Pause, PenLine, PlayIcon, Send, Trash2, UserRound, Video, X } from "lucide-react";
+import { Camera, Check, Download, FileImage, FileText, Forward, MapPin, Mic, MoreHorizontal, Paperclip, Pause, PenLine, PlayIcon, Reply, Send, Trash2, UserRound, Video, X } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -27,6 +27,10 @@ interface ChatWindowProps {
   onLoadOlderMessages?: () => Promise<number>;
   onCloseChat?: () => void;
   onSendMessage?: (input: { text: string; file: File | null }) => Promise<void>;
+  onReplyMessage?: (input: { text: string; file: File | null; replyTo: MessageRecord }) => Promise<void>;
+  onForwardMessage?: (input: { message: MessageRecord; targetChatId: string }) => Promise<void>;
+  onDeleteMessage?: (message: MessageRecord) => Promise<void>;
+  forwardTargets?: ChatRecord[];
   error?: string;
 }
 
@@ -59,6 +63,77 @@ function getMessageText(message: MessageRecord) {
   if (message.content) return message.content;
   if (message.message_type) return `Midia: ${message.message_type}`;
   return "Mensagem sem conteudo";
+}
+
+function getMessagePreviewText(message: MessageRecord) {
+  if (message.content?.trim()) return message.content.trim();
+  const kind = getMediaKind(message);
+  if (kind === "image") return "Foto";
+  if (kind === "video") return "Video";
+  if (kind === "audio") return "Audio";
+  if (kind === "sticker") return "Figurinha";
+  if (kind === "file") return "Arquivo";
+  return "Mensagem";
+}
+
+function getMessageExtraField(message: MessageRecord, keys: string[]) {
+  const record = message as MessageRecord & Record<string, unknown>;
+  const value = keys.map((key) => record[key]).find((item) => typeof item === "string" && item.trim());
+
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function hasDeletedMarker(value: unknown, depth = 0): boolean {
+  if (depth > 5 || value == null) return false;
+
+  if (typeof value === "string") {
+    const normalized = value.toLowerCase();
+    return normalized.includes("deleted") || normalized.includes("delete") || normalized.includes("revoked") || normalized.includes("revoke") || normalized.includes("apagada");
+  }
+
+  if (typeof value === "boolean") return value;
+
+  if (Array.isArray(value)) {
+    return value.some((item) => hasDeletedMarker(item, depth + 1));
+  }
+
+  if (!isRecord(value)) return false;
+
+  return Object.entries(value).some(([key, item]) => {
+    const normalizedKey = key.toLowerCase();
+    const keyLooksDeleted =
+      normalizedKey.includes("deleted") ||
+      normalizedKey.includes("delete") ||
+      normalizedKey.includes("revoked") ||
+      normalizedKey.includes("revoke") ||
+      normalizedKey.includes("apagada") ||
+      normalizedKey === "messagestubtype" ||
+      normalizedKey === "protocolmessage";
+
+    if (keyLooksDeleted && hasDeletedMarker(item, depth + 1)) return true;
+    return isRecord(item) || Array.isArray(item) ? hasDeletedMarker(item, depth + 1) : false;
+  });
+}
+
+function getMessageJsonField(message: MessageRecord, keys: string[]) {
+  const record = message as MessageRecord & Record<string, unknown>;
+  return keys.map((key) => record[key]).find((value) => value != null);
+}
+
+function getQuotedMessage(message: MessageRecord) {
+  const content = getMessageExtraField(message, ["quoted_content", "quoted_text", "quoted_message", "reply_to_content", "reply_content"]);
+  const messageId = getMessageExtraField(message, ["quoted_message_id", "reply_to_message_id", "quoted_id"]);
+
+  if (!content && !messageId) return null;
+
+  return {
+    content: content || "Mensagem",
+    fromMe: Boolean(message.quoted_from_me ?? (message as MessageRecord & { reply_to_from_me?: boolean }).reply_to_from_me),
+  };
 }
 
 function getMediaUrl(message: MessageRecord) {
@@ -105,6 +180,31 @@ function getAttachmentLabel(file: File) {
   return "Documento";
 }
 
+function isDeletedMessage(message: MessageRecord) {
+  const status = message.status?.toLowerCase() || "";
+  const type = message.message_type?.toLowerCase() || "";
+  const content = message.content?.toLowerCase() || "";
+  const deletedAt = getMessageExtraField(message, ["deleted_at", "deletedAt"]);
+  const flags = message as MessageRecord & { deleted?: boolean | null; is_revoked?: boolean | null };
+  const nestedData = getMessageJsonField(message, ["metadata", "raw_message", "message", "data", "json", "message_json", "message_data"]);
+
+  return (
+    !!deletedAt ||
+    !!message.is_deleted ||
+    !!message.revoked ||
+    !!flags.deleted ||
+    !!flags.is_revoked ||
+    hasDeletedMarker(nestedData) ||
+    status.includes("deleted") ||
+    status.includes("revoked") ||
+    type.includes("deleted") ||
+    type.includes("revoked") ||
+    type.includes("protocol") ||
+    content.includes("mensagem apagada") ||
+    content.includes("message deleted")
+  );
+}
+
 function getSupportedAudioMimeType() {
   if (typeof MediaRecorder === "undefined") return "";
 
@@ -118,13 +218,33 @@ function getAudioFileExtension(mimeType: string) {
   return "webm";
 }
 
-export function ChatWindow({ chat, messages, isLoading, isLoadingOlder, hasMoreMessages, onLoadOlderMessages, onCloseChat, onSendMessage, error }: ChatWindowProps) {
+export function ChatWindow({
+  chat,
+  messages,
+  isLoading,
+  isLoadingOlder,
+  hasMoreMessages,
+  onLoadOlderMessages,
+  onCloseChat,
+  onSendMessage,
+  onReplyMessage,
+  onForwardMessage,
+  onDeleteMessage,
+  forwardTargets = [],
+  error,
+}: ChatWindowProps) {
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
   const [draft, setDraft] = useState("");
   const [attachment, setAttachment] = useState<File | null>(null);
   const [isAttachmentPreviewOpen, setIsAttachmentPreviewOpen] = useState(false);
   const [expandedImage, setExpandedImage] = useState<{ url: string; alt: string } | null>(null);
   const [isSending, setIsSending] = useState(false);
+  const [replyTo, setReplyTo] = useState<MessageRecord | null>(null);
+  const [forwardingMessage, setForwardingMessage] = useState<MessageRecord | null>(null);
+  const [deleteConfirmationMessage, setDeleteConfirmationMessage] = useState<MessageRecord | null>(null);
+  const [selectedForwardTarget, setSelectedForwardTarget] = useState("");
+  const [isForwarding, setIsForwarding] = useState(false);
+  const [messageActionError, setMessageActionError] = useState<string | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [isRecordingPaused, setIsRecordingPaused] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
@@ -272,7 +392,7 @@ export function ChatWindow({ chat, messages, isLoading, isLoadingOlder, hasMoreM
   async function handleSubmit(event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault();
 
-    if (!onSendMessage || isSending) return;
+    if ((!onSendMessage && !onReplyMessage) || isSending) return;
 
     const text = draft.trim();
     if (!text && !attachment) return;
@@ -280,8 +400,13 @@ export function ChatWindow({ chat, messages, isLoading, isLoadingOlder, hasMoreM
     setIsSending(true);
 
     try {
-      await onSendMessage({ text, file: attachment });
+      if (replyTo && onReplyMessage) {
+        await onReplyMessage({ text, file: attachment, replyTo });
+      } else {
+        await onSendMessage?.({ text, file: attachment });
+      }
       setDraft("");
+      setReplyTo(null);
       removeAttachment();
     } finally {
       setIsSending(false);
@@ -303,6 +428,59 @@ export function ChatWindow({ chat, messages, isLoading, isLoadingOlder, hasMoreM
   function clearAttachmentInputs() {
     for (const input of [fileInputRef.current, photoInputRef.current, videoInputRef.current, cameraInputRef.current]) {
       if (input) input.value = "";
+    }
+  }
+
+  function beginReply(message: MessageRecord) {
+    if (isDeletedMessage(message)) return;
+
+    setReplyTo(message);
+    setMessageActionError(null);
+  }
+
+  function beginForward(message: MessageRecord) {
+    if (isDeletedMessage(message)) return;
+
+    setForwardingMessage(message);
+    setSelectedForwardTarget(chat?.chat_id || "");
+    setMessageActionError(null);
+  }
+
+  async function handleForwardSubmit() {
+    if (!forwardingMessage || !selectedForwardTarget || !onForwardMessage || isForwarding) return;
+
+    setIsForwarding(true);
+    setMessageActionError(null);
+
+    try {
+      await onForwardMessage({ message: forwardingMessage, targetChatId: selectedForwardTarget });
+      setForwardingMessage(null);
+      setSelectedForwardTarget("");
+    } catch (error) {
+      setMessageActionError(error instanceof Error ? error.message : "Nao foi possivel encaminhar a mensagem.");
+    } finally {
+      setIsForwarding(false);
+    }
+  }
+
+  function beginDelete(message: MessageRecord) {
+    if (isDeletedMessage(message)) return;
+
+    setMessageActionError(null);
+    setDeleteConfirmationMessage(message);
+  }
+
+  async function handleDeleteMessage() {
+    if (!deleteConfirmationMessage || !onDeleteMessage || isDeletedMessage(deleteConfirmationMessage)) return;
+
+    const message = deleteConfirmationMessage;
+    setMessageActionError(null);
+
+    try {
+      await onDeleteMessage(message);
+      setDeleteConfirmationMessage(null);
+    } catch (error) {
+      setMessageActionError(error instanceof Error ? error.message : "Nao foi possivel apagar a mensagem.");
     }
   }
 
@@ -533,14 +711,58 @@ export function ChatWindow({ chat, messages, isLoading, isLoadingOlder, hasMoreM
                       const mediaUrl = getMediaUrl(message);
                       const mediaKind = getMediaKind(message);
                       const hasCaption = !!message.content?.trim();
+                      const deleted = isDeletedMessage(message);
+                      const quotedMessage = getQuotedMessage(message);
 
                       return (
                         <div key={message.id} className={cn("mb-2 flex", fromMe ? "justify-end" : "justify-start")}>
-                          <div className={cn("max-w-[72%] rounded-lg px-3 py-2 shadow-sm transition-colors", fromMe ? "rounded-tr-none bg-(--chat-me)" : "rounded-tl-none bg-(--chat-other)")}>
+                          <div
+                            className={cn(
+                              "group relative max-w-[72%] rounded-lg px-3 py-2 shadow-sm transition-colors",
+                              fromMe ? "rounded-tr-none bg-(--chat-me)" : "rounded-tl-none bg-(--chat-other)",
+                              deleted && "border border-dashed border-red-500/45 bg-(--chat-muted)/80 opacity-80 shadow-none saturate-[0.65]",
+                            )}
+                          >
                             {message.participant && !fromMe && <p className="mb-1 text-sm font-medium text-(--chat-primary)">{message.participant}</p>}
 
-                            {mediaUrl ? (
-                              <div className="flex max-w-full flex-col gap-2">
+                            {!deleted && (
+                              <div className={cn("absolute top-1 flex rounded-full bg-(--chat-card)/90 p-0.5 opacity-0 shadow-sm transition-opacity group-hover:opacity-100", fromMe ? "right-full mr-2" : "left-full ml-2")}>
+                                <Button type="button" variant="ghost" size="icon-sm" className="h-7 w-7 rounded-full text-muted-foreground hover:text-foreground" onClick={() => beginReply(message)} aria-label="Responder mensagem">
+                                  <Reply className="h-4 w-4" />
+                                </Button>
+                                <Button type="button" variant="ghost" size="icon-sm" className="h-7 w-7 rounded-full text-muted-foreground hover:text-foreground" onClick={() => beginForward(message)} aria-label="Encaminhar mensagem">
+                                  <Forward className="h-4 w-4" />
+                                </Button>
+                                {fromMe && (
+                                  <Button type="button" variant="ghost" size="icon-sm" className="h-7 w-7 rounded-full text-muted-foreground hover:text-red-500" onClick={() => beginDelete(message)} aria-label="Apagar mensagem">
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                )}
+                              </div>
+                            )}
+
+                            {deleted && (
+                              <div className="mb-2 flex items-center gap-2 rounded-md border border-red-500/25 bg-red-500/10 px-2.5 py-1.5 text-[11px] font-medium text-red-700 dark:text-red-300">
+                                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-red-500/20">
+                                  <Trash2 className="h-3 w-3" />
+                                </span>
+                                <span className="min-w-0">
+                                  <span className="block leading-none">Mensagem apagada</span>
+                                  <span className="mt-0.5 block truncate text-[10px] font-normal text-(--chat-muted-foreground)">Conteudo preservado apenas para historico interno</span>
+                                </span>
+                              </div>
+                            )}
+
+                            <div className={cn(deleted && "rounded-md bg-(--chat-background)/20 p-2 opacity-70")}>
+                              {quotedMessage && (
+                                <div className="mb-2 border-l-2 border-teal-500 bg-(--chat-background)/35 px-2 py-1.5">
+                                  <p className="text-[11px] font-semibold text-teal-600 dark:text-teal-300">{quotedMessage.fromMe ? "Voce" : getDisplayName(chat)}</p>
+                                  <p className="line-clamp-2 text-xs text-(--chat-muted-foreground)">{quotedMessage.content}</p>
+                                </div>
+                              )}
+
+                              {mediaUrl ? (
+                                <div className="flex max-w-full flex-col gap-2">
                                 {mediaKind === "image" && (
                                   <button
                                     type="button"
@@ -609,10 +831,11 @@ export function ChatWindow({ chat, messages, isLoading, isLoadingOlder, hasMoreM
                                     </a>
                                   </div>
                                 )}
-                              </div>
-                            ) : (
-                              <p className="whitespace-pre-wrap break-words text-sm text-(--chat-foreground)">{getMessageText(message)}</p>
-                            )}
+                                </div>
+                              ) : (
+                                <p className="whitespace-pre-wrap break-words text-sm text-(--chat-foreground)">{getMessageText(message)}</p>
+                              )}
+                            </div>
 
                             <div className="mt-1 flex items-center justify-end gap-1 text-[10px] text-(--chat-muted-foreground) opacity-70">
                               <span>{getTimeLabel(message.timestamp_msg)}</span>
@@ -656,6 +879,27 @@ export function ChatWindow({ chat, messages, isLoading, isLoadingOlder, hasMoreM
             </div>
           )}
 
+          {replyTo && (
+            <div className="mb-2 flex items-center gap-3 rounded-md border-l-4 border-teal-500 bg-secondary px-3 py-2 text-sm">
+              <Reply className="h-4 w-4 shrink-0 text-teal-500" />
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-semibold text-teal-600 dark:text-teal-300">Respondendo {replyTo.from_me ? "voce" : getDisplayName(chat)}</p>
+                <p className="truncate text-xs text-muted-foreground">{getMessagePreviewText(replyTo)}</p>
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                className="shrink-0 text-muted-foreground hover:text-foreground"
+                onClick={() => setReplyTo(null)}
+                aria-label="Cancelar resposta"
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+          )}
+
+          {messageActionError && <p className="mb-2 rounded-md bg-red-500/10 px-3 py-2 text-xs text-red-500">{messageActionError}</p>}
           {recordingError && <p className="mb-2 rounded-md bg-red-500/10 px-3 py-2 text-xs text-red-500">{recordingError}</p>}
 
           <div className="flex items-center gap-3">
@@ -941,6 +1185,102 @@ export function ChatWindow({ chat, messages, isLoading, isLoadingOlder, hasMoreM
               />
             </span>
           </button>
+        </div>
+      )}
+
+      {forwardingMessage && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-lg border border-border bg-card shadow-2xl">
+            <div className="flex items-center justify-between border-b border-border px-4 py-3">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-foreground">Encaminhar mensagem</p>
+                <p className="truncate text-xs text-muted-foreground">{getMessagePreviewText(forwardingMessage)}</p>
+              </div>
+              <Button type="button" variant="ghost" size="icon" onClick={() => setForwardingMessage(null)} aria-label="Fechar encaminhamento">
+                <X className="h-5 w-5" />
+              </Button>
+            </div>
+
+            <div className="space-y-3 p-4">
+              <label className="block text-xs font-medium text-muted-foreground" htmlFor="forward-target">
+                Enviar para
+              </label>
+              <select
+                id="forward-target"
+                value={selectedForwardTarget}
+                onChange={(event) => setSelectedForwardTarget(event.target.value)}
+                className="h-10 w-full rounded-md border border-border bg-secondary px-3 text-sm text-foreground outline-none transition-colors focus:border-teal-500"
+              >
+                {forwardTargets.map((target) => (
+                  <option key={target.id} value={target.chat_id}>
+                    {getDisplayName(target)}
+                  </option>
+                ))}
+              </select>
+
+              <div className="rounded-md border-l-4 border-teal-500 bg-secondary px-3 py-2">
+                <p className="text-xs font-semibold text-teal-600 dark:text-teal-300">{forwardingMessage.from_me ? "Voce" : getDisplayName(chat)}</p>
+                <p className="mt-1 line-clamp-3 text-sm text-muted-foreground">{getMessagePreviewText(forwardingMessage)}</p>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 border-t border-border px-4 py-3">
+              <Button type="button" variant="ghost" onClick={() => setForwardingMessage(null)}>
+                Cancelar
+              </Button>
+              <Button
+                type="button"
+                className="bg-teal-500 text-white hover:bg-teal-600"
+                onClick={handleForwardSubmit}
+                disabled={!selectedForwardTarget || isForwarding}
+              >
+                {isForwarding ? (
+                  "Encaminhando..."
+                ) : (
+                  <>
+                    <Check className="h-4 w-4" />
+                    Encaminhar
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleteConfirmationMessage && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-lg border border-border bg-card shadow-2xl">
+            <div className="flex items-center gap-3 border-b border-border px-4 py-3">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-red-500/10 text-red-500">
+                <Trash2 className="h-5 w-5" />
+              </span>
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-foreground">Apagar mensagem?</p>
+                <p className="text-xs text-muted-foreground">A acao sera enviada ao webhook de envio. O banco nao sera alterado diretamente.</p>
+              </div>
+            </div>
+
+            <div className="space-y-3 p-4">
+              <div className="rounded-md border-l-4 border-red-500 bg-secondary px-3 py-2">
+                <p className="text-xs font-semibold text-red-500">{deleteConfirmationMessage.from_me ? "Voce" : getDisplayName(chat)}</p>
+                <p className="mt-1 line-clamp-3 text-sm text-muted-foreground">{getMessagePreviewText(deleteConfirmationMessage)}</p>
+              </div>
+              <p className="text-xs leading-relaxed text-muted-foreground">
+                Depois da confirmacao, a mensagem fica marcada visualmente como apagada e o webhook recebe os dados da mensagem original para processar o apagamento.
+              </p>
+            </div>
+
+            <div className="flex justify-end gap-2 border-t border-border px-4 py-3">
+              <Button type="button" variant="ghost" onClick={() => setDeleteConfirmationMessage(null)}>
+                Cancelar
+              </Button>
+              <Button type="button" variant="destructive" onClick={handleDeleteMessage}>
+                <Trash2 className="h-4 w-4" />
+                Confirmar
+              </Button>
+            </div>
+          </div>
         </div>
       )}
 

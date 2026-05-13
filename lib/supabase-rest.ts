@@ -56,12 +56,34 @@ export interface MessageRecord {
   public_midia_thumb: string | null
   timestamp_msg: string | null
   status: string | null
+  quoted_message_id?: string | null
+  quoted_content?: string | null
+  quoted_from_me?: boolean | null
+  quoted_message_type?: string | null
+  metadata?: unknown
+  raw_message?: unknown
+  message?: unknown
+  data?: unknown
+  deleted_at?: string | null
+  is_deleted?: boolean | null
+  revoked?: boolean | null
 }
 
 export interface SendMessageInput {
   chatId: string
   text?: string
   file?: File | null
+  replyTo?: MessageRecord | null
+}
+
+export interface ForwardMessageInput {
+  targetChatId: string
+  message: MessageRecord
+}
+
+export interface DeleteMessageInput {
+  chatId: string
+  message: MessageRecord
 }
 
 export interface LatestMessageStatusRecord {
@@ -152,22 +174,7 @@ export function fetchChats({ limit = 50, offset = 0, search }: ChatQueryOptions 
 }
 
 export function fetchMessages(chatId: string, { limit = 50, offset = 0 }: PaginationOptions = {}) {
-  const select = [
-    "id",
-    "message_id",
-    "from_me",
-    "chat_id",
-    "participant",
-    "message_type",
-    "content",
-    "media_url",
-    "media_path",
-    "media_mime_type",
-    "public_media_url",
-    "public_midia_thumb",
-    "timestamp_msg",
-    "status",
-  ].join(",")
+  const select = "*"
 
   return supabaseGet<MessageRecord[]>(
     `messages?select=${select}&chat_id=eq.${encodeURIComponent(chatId)}&order=timestamp_msg.desc.nullslast&limit=${limit}&offset=${offset}`,
@@ -207,7 +214,7 @@ export function fetchLatestMessageStatuses(chatIds: string[]) {
   })
 }
 
-export async function sendMessage({ chatId, text, file }: SendMessageInput) {
+export async function sendMessage({ chatId, text, file, replyTo }: SendMessageInput) {
   const formData = new FormData()
   formData.append("chat_id", chatId)
 
@@ -220,6 +227,13 @@ export async function sendMessage({ chatId, text, file }: SendMessageInput) {
     formData.append("file", file)
   }
 
+  if (replyTo) {
+    formData.append("reply_to_message_id", replyTo.message_id || replyTo.id)
+    formData.append("reply_to_content", replyTo.content || "")
+    formData.append("reply_to_type", replyTo.message_type || "")
+    formData.append("reply_to_from_me", String(!!replyTo.from_me))
+  }
+
   const response = await fetch("/api/send-message", {
     method: "POST",
     body: formData,
@@ -228,6 +242,53 @@ export async function sendMessage({ chatId, text, file }: SendMessageInput) {
   if (!response.ok) {
     const error = await response.json().catch(() => null)
     throw new Error(error?.message || `Nao foi possivel enviar a mensagem (${response.status}).`)
+  }
+
+  return response.json()
+}
+
+export async function forwardMessage({ targetChatId, message }: ForwardMessageInput) {
+  const response = await fetch("/api/message-action", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      action: "forward",
+      target_chat_id: targetChatId,
+      message_id: message.message_id || message.id,
+      message_type: message.message_type || "text",
+      content: message.content || "",
+      media_url: message.public_media_url || message.media_url || null,
+      media_mime_type: message.media_mime_type || null,
+    }),
+  })
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => null)
+    throw new Error(error?.message || `Nao foi possivel encaminhar a mensagem (${response.status}).`)
+  }
+
+  return response.json()
+}
+
+export async function deleteMessage({ chatId, message }: DeleteMessageInput) {
+  const response = await fetch("/api/message-action", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      action: "delete",
+      chat_id: chatId,
+      message_id: message.message_id || message.id,
+      from_me: !!message.from_me,
+    }),
+  })
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => null)
+    throw new Error(error?.message || `Nao foi possivel apagar a mensagem (${response.status}).`)
   }
 
   return response.json()

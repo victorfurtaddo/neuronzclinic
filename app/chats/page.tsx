@@ -10,6 +10,8 @@ import {
   fetchChats,
   fetchLatestMessageStatuses,
   fetchMessages,
+  deleteMessage,
+  forwardMessage,
   sendMessage,
 } from "@/lib/supabase-rest"
 
@@ -220,6 +222,96 @@ export default function ChatsPage() {
     [refreshMessagesAfterSend, selectedChatRemoteId],
   )
 
+  const handleReplyMessage = useCallback(
+    async ({ text, file, replyTo }: { text: string; file: File | null; replyTo: MessageRecord }) => {
+      if (!selectedChatRemoteId) return
+
+      const timestamp = new Date().toISOString()
+      const optimisticId = `optimistic-${crypto.randomUUID()}`
+      const localMediaUrl = file ? URL.createObjectURL(file) : null
+      const optimisticMessage: MessageRecord = {
+        id: optimisticId,
+        message_id: optimisticId,
+        from_me: true,
+        chat_id: selectedChatRemoteId,
+        participant: null,
+        message_type: getOptimisticMessageType(file),
+        content: text || (file ? file.name : ""),
+        media_url: null,
+        media_path: null,
+        media_mime_type: file?.type || null,
+        public_media_url: localMediaUrl,
+        public_midia_thumb: null,
+        timestamp_msg: timestamp,
+        status: "sending",
+        quoted_message_id: replyTo.message_id || replyTo.id,
+        quoted_content: replyTo.content || "",
+        quoted_from_me: replyTo.from_me,
+        quoted_message_type: replyTo.message_type,
+      }
+
+      setMessages((current) => [...current, optimisticMessage])
+      setError(undefined)
+
+      try {
+        await sendMessage({ chatId: selectedChatRemoteId, text, file, replyTo })
+        await refreshMessagesAfterSend(selectedChatRemoteId, optimisticId)
+        window.setTimeout(() => void refreshMessagesAfterSend(selectedChatRemoteId, optimisticId), 2500)
+        window.setTimeout(() => void refreshMessagesAfterSend(selectedChatRemoteId, optimisticId), 7000)
+      } catch (err) {
+        setMessages((current) =>
+          current.map((message) => (message.id === optimisticId ? { ...message, status: "error" } : message)),
+        )
+        setError(err instanceof Error ? err.message : "Nao foi possivel responder a mensagem.")
+        throw err
+      } finally {
+        if (localMediaUrl) {
+          window.setTimeout(() => URL.revokeObjectURL(localMediaUrl), 60000)
+        }
+      }
+    },
+    [refreshMessagesAfterSend, selectedChatRemoteId],
+  )
+
+  const handleForwardMessage = useCallback(
+    async ({ message, targetChatId }: { message: MessageRecord; targetChatId: string }) => {
+      await forwardMessage({ message, targetChatId })
+
+      if (targetChatId === selectedChatRemoteId) {
+        await refreshMessagesAfterSend(targetChatId, message.id)
+      }
+    },
+    [refreshMessagesAfterSend, selectedChatRemoteId],
+  )
+
+  const handleDeleteMessage = useCallback(
+    async (message: MessageRecord) => {
+      if (!selectedChatRemoteId) return
+
+      const previousMessages = messages
+      setMessages((current) =>
+        current.map((currentMessage) =>
+          currentMessage.id === message.id
+            ? {
+                ...currentMessage,
+                status: "deleted",
+              }
+            : currentMessage,
+        ),
+      )
+      setError(undefined)
+
+      try {
+        await deleteMessage({ chatId: selectedChatRemoteId, message })
+      } catch (err) {
+        setMessages(previousMessages)
+        setError(err instanceof Error ? err.message : "Nao foi possivel apagar a mensagem.")
+        throw err
+      }
+    },
+    [messages, selectedChatRemoteId],
+  )
+
   useEffect(() => {
     let isMounted = true
 
@@ -355,6 +447,10 @@ export default function ChatsPage() {
         onLoadOlderMessages={loadOlderMessages}
         onCloseChat={() => setSelectedChatId(undefined)}
         onSendMessage={handleSendMessage}
+        onReplyMessage={handleReplyMessage}
+        onForwardMessage={handleForwardMessage}
+        onDeleteMessage={handleDeleteMessage}
+        forwardTargets={chats}
         error={error}
       />
     </div>
