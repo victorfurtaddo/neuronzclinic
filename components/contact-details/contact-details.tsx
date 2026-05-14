@@ -1,11 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { X, ChevronDown, Phone, CheckCheck, MessageSquareDashed, Bot } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { ChatRecord } from "@/lib/supabase-rest";
+import type { ChatTag } from "@/lib/chat-tags";
+import type { ChatStatusOption } from "@/lib/chat-status";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
 import { Avatar, AvatarFallback, AvatarImage } from "../ui/avatar";
@@ -17,16 +19,43 @@ interface ContactDetailsProps {
   onClose?: () => void;
   onToggleStatus: () => void;
   onToggleIA: () => void;
+  statusOptions?: ChatStatusOption[];
+  tagOptions?: ChatTag[];
+  onChangeStatus?: (status: ChatStatusOption) => void;
+  onToggleTag?: (tag: ChatTag) => void;
+  onMarkAsRead?: () => void;
+  onMarkAsUnread?: () => void;
+  onReorderTags?: (tags: ChatTag[]) => void;
+  onCommitTagOrder?: (tags: ChatTag[]) => void;
 }
 
-export function ContactDetails({ chat, onClose, onToggleStatus, onToggleIA }: ContactDetailsProps) {
-  const [view, setView] = useState<"profile" | "training">("profile");
+function getContactPhone(chat?: ChatRecord) {
+  const candidates = [chat?.phone_contact, chat?.chat_id, chat?.lid_id];
+  const phone = candidates
+    .map((value) => value?.replace(/@.+$/, "").replace(/\D/g, ""))
+    .find((value) => value && value.length >= 8);
 
-  useEffect(() => {
-    if (view === "training" && chat?.ia_responde === false) {
-      setView("profile");
-    }
-  }, [chat?.ia_responde, view]);
+  return phone || chat?.phone_contact?.trim() || chat?.chat_id?.replace(/@.+$/, "") || "Sem telefone";
+}
+
+export function ContactDetails({
+  chat,
+  onClose,
+  onToggleStatus,
+  onToggleIA,
+  statusOptions,
+  tagOptions,
+  onChangeStatus,
+  onToggleTag,
+  onMarkAsRead,
+  onMarkAsUnread,
+  onReorderTags,
+  onCommitTagOrder,
+}: ContactDetailsProps) {
+  const [view, setView] = useState<"profile" | "training">("profile");
+  const contactPhone = getContactPhone(chat);
+  const hasUnreadMessages = !!chat?.unread_count;
+  const activeView = chat?.ia_responde === false ? "profile" : view;
 
   return (
     <div className="flex h-full w-full flex-col border-l border-border bg-card">
@@ -66,17 +95,25 @@ export function ContactDetails({ chat, onClose, onToggleStatus, onToggleIA }: Co
             </DropdownMenu>
 
             <div className="space-y-1.5">
-              <button className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground">
+              <button
+                type="button"
+                className={cn("flex items-center gap-2 text-xs transition-colors hover:text-foreground", hasUnreadMessages ? "text-muted-foreground" : "text-blue-500")}
+                onClick={onMarkAsRead}
+              >
                 <CheckCheck className="h-3.5 w-3.5 text-blue-500" />
                 <span>Marcar como lido</span>
               </button>
-              <button className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground">
+              <button
+                type="button"
+                className={cn("flex items-center gap-2 text-xs transition-colors hover:text-foreground", hasUnreadMessages ? "text-blue-500" : "text-muted-foreground")}
+                onClick={onMarkAsUnread}
+              >
                 <MessageSquareDashed className="h-3.5 w-3.5" />
                 <span>Marcar como não lido</span>
               </button>
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
                 <Phone className="h-3.5 w-3.5" />
-                <span>{chat?.phone_contact || "Sem telefone"}</span>
+                <span>{contactPhone}</span>
               </div>
             </div>
           </div>
@@ -91,7 +128,7 @@ export function ContactDetails({ chat, onClose, onToggleStatus, onToggleIA }: Co
                     disabled={!chat?.ia_responde}
                     className={cn(
                       "h-10 w-10 border-2 shadow-sm transition-all",
-                      view === "profile" ? "bg-(--chat-primary) text-white border-(--chat-primary)" : "border-(--chat-primary) text-(--chat-primary) hover:bg-(--chat-primary)/10",
+                      activeView === "profile" ? "bg-(--chat-primary) text-white border-(--chat-primary)" : "border-(--chat-primary) text-(--chat-primary) hover:bg-(--chat-primary)/10",
                       !chat?.ia_responde && "opacity-50",
                     )}
                     onClick={() => setView((prev) => (prev === "profile" ? "training" : "profile"))}
@@ -118,7 +155,21 @@ export function ContactDetails({ chat, onClose, onToggleStatus, onToggleIA }: Co
 
         {/* ================================================= */}
 
-        <div className="flex-1 overflow-y-auto">{view === "profile" ? <ProfileView chat={chat} /> : <IATrainingView chat={chat} />}</div>
+        <div className="flex-1 overflow-y-auto">
+          {activeView === "profile" ? (
+            <ProfileView
+              chat={chat}
+              statusOptions={statusOptions}
+              tagOptions={tagOptions}
+              onChangeStatus={onChangeStatus}
+              onToggleTag={onToggleTag}
+              onReorderTags={onReorderTags}
+              onCommitTagOrder={onCommitTagOrder}
+            />
+          ) : (
+            <IATrainingView chat={chat} />
+          )}
+        </div>
       </div>
     </div>
   );

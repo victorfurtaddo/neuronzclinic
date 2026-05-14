@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { getChatTags, getReadableTextColor } from "@/lib/chat-tags"
+import { getChatStatusColor, getChatStatusLabel } from "@/lib/chat-status"
 import { cn } from "@/lib/utils"
 import { ChatRecord, LatestMessageStatus } from "@/lib/supabase-rest"
 import { MessageStatusIcon } from "./message-status-icon"
@@ -54,18 +55,6 @@ function getTime(chat: ChatRecord) {
   }
 
   return chat.last_time_formatado ?? ""
-}
-
-function getStatusColor(chat: ChatRecord) {
-  if (chat.hex_status && /^#[0-9a-f]{6}$/i.test(chat.hex_status)) {
-    return chat.hex_status
-  }
-
-  return chat.finalizada ? "#6b7280" : "#22c55e"
-}
-
-function getStatusLabel(chat: ChatRecord) {
-  return chat.finalizada ? "Finalizada" : chat.Status_chat || "Aberta"
 }
 
 function getFilterValues(value: unknown): string[] {
@@ -129,7 +118,7 @@ export function ContactList({
   const [sectorLabels, setSectorLabels] = useState<Record<string, string>>({})
   const [sectorCatalog, setSectorCatalog] = useState<string[]>([])
 
-  const statusOptions = useMemo(() => getUniqueOptions(chats.map(getStatusLabel)), [chats])
+  const statusOptions = useMemo(() => getUniqueOptions(chats.map(getChatStatusLabel)), [chats])
   const tagOptions = useMemo(
     () => getUniqueOptions(chats.flatMap((chat) => getChatTags(chat).map((tag) => tag.label))),
     [chats],
@@ -202,7 +191,7 @@ export function ContactList({
 
   const filteredChats = useMemo(() => {
     return chats.filter((chat) => {
-      if (statusFilter !== ALL_FILTERS && getStatusLabel(chat) !== statusFilter) return false
+      if (statusFilter !== ALL_FILTERS && getChatStatusLabel(chat) !== statusFilter) return false
       if (
         sectorFilter !== ALL_FILTERS &&
         !getSectorIds(chat.setor)
@@ -387,9 +376,9 @@ export function ContactList({
                   </Avatar>
                   <span
                     className="absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full border-2 border-card"
-                    style={{ backgroundColor: getStatusColor(chat) }}
-                    title={`Status: ${getStatusLabel(chat)}`}
-                    aria-label={`Status: ${getStatusLabel(chat)}`}
+                    style={{ backgroundColor: getChatStatusColor(chat) }}
+                    title={`Status: ${getChatStatusLabel(chat)}`}
+                    aria-label={`Status: ${getChatStatusLabel(chat)}`}
                   />
                 </div>
 

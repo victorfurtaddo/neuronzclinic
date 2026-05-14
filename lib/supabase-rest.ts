@@ -98,6 +98,14 @@ export interface DeleteMessagesInput {
   messages: MessageRecord[]
 }
 
+export interface UpdateChatDetailsInput {
+  id: string
+  Status_chat?: string | null
+  hex_status?: string | null
+  finalizada?: boolean | null
+  tags?: Array<{ id: string; label: string; color?: string | null }>
+}
+
 export interface LatestMessageStatusRecord {
   chat_id: string | null
   status: string | null
@@ -336,4 +344,21 @@ export async function deleteMessages({ chatId, messages }: DeleteMessagesInput) 
 
 export function deleteMessage({ chatId, message }: DeleteMessageInput) {
   return deleteMessages({ chatId, messages: [message] })
+}
+
+export async function updateChatDetails({ id, ...payload }: UpdateChatDetailsInput) {
+  const response = await fetch(`/api/chats/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  })
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => null)
+    throw new Error(error?.message || `Nao foi possivel atualizar o contato (${response.status}).`)
+  }
+
+  return response.json() as Promise<{ chat: ChatRecord }>
 }

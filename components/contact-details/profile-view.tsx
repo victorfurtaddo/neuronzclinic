@@ -2,27 +2,98 @@ import { ChatRecord } from "@/lib/supabase-rest";
 import { Input } from "../ui/input";
 import { Button } from "../ui/button";
 import { Calendar, ChevronDown, FileText, Pencil } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
+import type { ChatTag } from "@/lib/chat-tags";
 import { getChatTags, getReadableTextColor } from "@/lib/chat-tags";
+import { getChatStatusColor, getChatStatusLabel, type ChatStatusOption } from "@/lib/chat-status";
 import { cn } from "@/lib/utils";
+import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../ui/dropdown-menu";
 
 interface ProfileViewProps {
   chat?: ChatRecord;
+  statusOptions?: ChatStatusOption[];
+  tagOptions?: ChatTag[];
+  onChangeStatus?: (status: ChatStatusOption) => void;
+  onToggleTag?: (tag: ChatTag) => void;
+  onReorderTags?: (tags: ChatTag[]) => void;
+  onCommitTagOrder?: (tags: ChatTag[]) => void;
 }
 
 function getDisplayName(chat?: ChatRecord) {
   return chat?.nome_contato || chat?.pushname || chat?.chat_id?.replace("@s.whatsapp.net", "") || "Contato sem nome";
 }
 
-export function ProfileView({ chat }: ProfileViewProps) {
+function getMergedTags(...groups: ChatTag[][]) {
+  const tags = new Map<string, ChatTag>();
+
+  for (const group of groups) {
+    for (const tag of group) {
+      const key = tag.id || tag.label;
+      if (!tags.has(key)) tags.set(key, tag);
+    }
+  }
+
+  return Array.from(tags.values());
+}
+
+function getMergedStatusOptions(...groups: ChatStatusOption[][]) {
+  const statuses = new Map<string, ChatStatusOption>();
+
+  for (const group of groups) {
+    for (const status of group) {
+      if (!status.label || statuses.has(status.label)) continue;
+      statuses.set(status.label, status);
+    }
+  }
+
+  return Array.from(statuses.values());
+}
+
+export function ProfileView({ chat, statusOptions = [], tagOptions = [], onChangeStatus, onToggleTag, onReorderTags, onCommitTagOrder }: ProfileViewProps) {
   const [bottomTab, setBottomTab] = useState<"consultas" | "avisos">("consultas");
   const [infoExpanded, setInfoExpanded] = useState(true);
+  const [draggedTagId, setDraggedTagId] = useState<string | null>(null);
+  const pendingReorderedTagsRef = useRef<ChatTag[] | null>(null);
   const tags = getChatTags(chat);
+  const selectedTagKeys = new Set(tags.flatMap((tag) => [tag.id, tag.label.toLowerCase()]));
+  const availableTags = getMergedTags(tags, tagOptions);
+  const availableStatuses = getMergedStatusOptions(
+    [
+      {
+        label: getChatStatusLabel(chat),
+        color: getChatStatusColor(chat),
+      },
+    ],
+    statusOptions,
+  );
 
   const bottomTabs = [
     { id: "consultas", label: "Consultas" },
     { id: "avisos", label: "Avisos / Tarefas" },
   ] as const;
+
+  function moveTag(targetTagId: string) {
+    if (!draggedTagId || draggedTagId === targetTagId) return;
+
+    const draggedIndex = tags.findIndex((tag) => tag.id === draggedTagId);
+    const targetIndex = tags.findIndex((tag) => tag.id === targetTagId);
+    if (draggedIndex < 0 || targetIndex < 0) return;
+
+    const nextTags = [...tags];
+    const [draggedTag] = nextTags.splice(draggedIndex, 1);
+    nextTags.splice(targetIndex, 0, draggedTag);
+    pendingReorderedTagsRef.current = nextTags;
+    onReorderTags?.(nextTags);
+  }
+
+  function finishTagDrag() {
+    setDraggedTagId(null);
+
+    if (pendingReorderedTagsRef.current) {
+      onCommitTagOrder?.(pendingReorderedTagsRef.current);
+      pendingReorderedTagsRef.current = null;
+    }
+  }
 
   return (
     <>
@@ -39,10 +110,28 @@ export function ProfileView({ chat }: ProfileViewProps) {
         <div className="mb-4 grid grid-cols-2 gap-3">
           <div>
             <label className="mb-1.5 block text-xs text-muted-foreground">Status contato</label>
-            <button className="flex w-full items-center justify-between rounded bg-red-500 px-3 py-1.5 text-sm font-medium text-white">
-              {chat?.Status_chat || "Nenhum"}
-              <ChevronDown className="h-4 w-4" />
-            </button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  className="flex w-full items-center justify-between rounded px-3 py-1.5 text-sm font-medium shadow-sm"
+                  style={{
+                    backgroundColor: getChatStatusColor(chat),
+                    color: getReadableTextColor(getChatStatusColor(chat)),
+                  }}
+                >
+                  {getChatStatusLabel(chat)}
+                  <ChevronDown className="h-4 w-4" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="z-[100] max-h-72 w-56">
+                {availableStatuses.map((status) => (
+                  <DropdownMenuItem key={status.label} className="cursor-pointer" onClick={() => onChangeStatus?.(status)}>
+                    <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: status.color || "#22c55e" }} />
+                    <span className="truncate">{status.label}</span>
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
           <div>
             <label className="mb-1.5 block text-xs text-muted-foreground">Status agendamento</label>
@@ -83,29 +172,64 @@ export function ProfileView({ chat }: ProfileViewProps) {
 
             <div className="mb-4">
               <label className="mb-1.5 block text-sm font-medium text-foreground">Tags do contato</label>
-              <div className="flex flex-wrap items-center gap-2 rounded border border-border bg-card px-3 py-2">
-                {tags.length > 0 ? (
-                  tags.map((tag) => (
-                    <span
-                      key={tag.id}
-                      className="flex items-center gap-1 rounded bg-teal-600 px-2 py-0.5 text-xs font-medium text-white"
-                      style={
-                        tag.color
-                          ? {
-                              backgroundColor: tag.color,
-                              color: getReadableTextColor(tag.color),
-                            }
-                          : undefined
-                      }
-                    >
-                      {tag.label}
-                    </span>
-                  ))
-                ) : (
-                  <span className="text-sm text-muted-foreground">Nenhuma tag</span>
-                )}
-                <ChevronDown className="ml-auto h-4 w-4 text-muted-foreground" />
-              </div>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button type="button" className="flex w-full flex-wrap items-center gap-2 rounded border border-border bg-card px-3 py-2 text-left">
+                    {tags.length > 0 ? (
+                      tags.map((tag) => (
+                        <span
+                          key={tag.id}
+                          draggable
+                          className={cn(
+                            "flex cursor-grab items-center gap-1 rounded bg-teal-600 px-2 py-0.5 text-xs font-medium text-white transition-opacity active:cursor-grabbing",
+                            draggedTagId === tag.id && "opacity-50",
+                          )}
+                          style={
+                            tag.color
+                              ? {
+                                  backgroundColor: tag.color,
+                                  color: getReadableTextColor(tag.color),
+                                }
+                              : undefined
+                          }
+                          onClick={(event) => event.stopPropagation()}
+                          onDragStart={(event) => {
+                            event.dataTransfer.effectAllowed = "move";
+                            event.dataTransfer.setData("text/plain", tag.id);
+                            setDraggedTagId(tag.id);
+                          }}
+                          onDragEnter={() => moveTag(tag.id)}
+                          onDragOver={(event) => event.preventDefault()}
+                          onDragEnd={finishTagDrag}
+                        >
+                          {tag.label}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="text-sm text-muted-foreground">Nenhuma tag</span>
+                    )}
+                    <ChevronDown className="ml-auto h-4 w-4 text-muted-foreground" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="z-[100] max-h-72 w-72">
+                  {availableTags.length > 0 ? (
+                    availableTags.map((tag) => (
+                      <DropdownMenuCheckboxItem
+                        key={tag.id || tag.label}
+                        checked={selectedTagKeys.has(tag.id) || selectedTagKeys.has(tag.label.toLowerCase())}
+                        className="cursor-pointer"
+                        onSelect={(event) => event.preventDefault()}
+                        onCheckedChange={() => onToggleTag?.(tag)}
+                      >
+                        <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: tag.color || "#0d9488" }} />
+                        <span className="truncate">{tag.label}</span>
+                      </DropdownMenuCheckboxItem>
+                    ))
+                  ) : (
+                    <DropdownMenuItem disabled>Nenhuma tag encontrada</DropdownMenuItem>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
 
             <div className="mb-4">

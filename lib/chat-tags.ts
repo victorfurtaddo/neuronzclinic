@@ -56,6 +56,19 @@ function getTagFromObject(value: TagLike): ChatTag | null {
 function normalizeTag(value: unknown): ChatTag | null {
   if (typeof value === "string") {
     const label = value.trim()
+    if (!label) return null
+
+    if ((label.startsWith("{") && label.endsWith("}")) || (label.startsWith("[") && label.endsWith("]"))) {
+      try {
+        const parsed = JSON.parse(label)
+        const parsedTags = tagsFromCandidate(parsed)
+
+        return parsedTags[0] ?? null
+      } catch {
+        return { id: label, label }
+      }
+    }
+
     return label ? { id: label, label } : null
   }
 
@@ -89,7 +102,7 @@ function tagsFromCandidate(candidate: unknown): ChatTag[] {
   return []
 }
 
-export function getChatTags(chat?: ChatRecord): ChatTag[] {
+export function getChatTags(chat?: Partial<ChatRecord>): ChatTag[] {
   if (!chat) return []
 
   const candidates = [chat.json_tags_parsed, chat.json_tags, chat.tag_chat_array]

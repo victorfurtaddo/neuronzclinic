@@ -3,7 +3,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ContactList } from "@/components/chat/contact-list";
 import { ChatWindow } from "@/components/chat/chat-window";
-import { ChatRecord, LatestMessageStatus, MessageRecord, fetchChats, fetchLatestMessageStatuses, fetchMessages, deleteMessage, deleteMessages, forwardMessage, forwardMessages, sendMessage } from "@/lib/supabase-rest";
+import { getChatTags, type ChatTag } from "@/lib/chat-tags";
+import { getChatStatusColor, getChatStatusLabel, type ChatStatusOption } from "@/lib/chat-status";
+import { ChatRecord, LatestMessageStatus, MessageRecord, fetchChats, fetchLatestMessageStatuses, fetchMessages, deleteMessage, deleteMessages, forwardMessage, forwardMessages, sendMessage, updateChatDetails } from "@/lib/supabase-rest";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { ContactDetails } from "@/components/contact-details/contact-details";
 
@@ -62,6 +64,49 @@ function hasFreshLatestStatus(chat: ChatRecord, latestStatus?: LatestMessageStat
   return statusMessageTime >= chatMessageTime - 5000;
 }
 
+function getTagKey(tag: ChatTag) {
+  return tag.id || tag.label;
+}
+
+function getStatusFields(chat: ChatRecord, status: ChatStatusOption) {
+  const normalizedStatus = status.label.toLowerCase();
+
+  return {
+    Status_chat: status.label,
+    hex_status: status.color || chat.hex_status,
+    finalizada: normalizedStatus === "finalizada" ? true : normalizedStatus === "aberta" ? false : chat.finalizada,
+  };
+}
+
+function getFallbackStatusOptions(chats: ChatRecord[]) {
+  const options = new Map<string, ChatStatusOption>();
+
+  for (const chat of chats) {
+    const label = getChatStatusLabel(chat);
+    if (!label || options.has(label)) continue;
+    options.set(label, {
+      label,
+      color: getChatStatusColor(chat),
+    });
+  }
+
+  return Array.from(options.values()).sort((a, b) => a.label.localeCompare(b.label, "pt-BR", { sensitivity: "base" }));
+}
+
+function getFallbackTagOptions(chats: ChatRecord[]) {
+  const options = new Map<string, ChatTag>();
+
+  for (const chat of chats) {
+    for (const tag of getChatTags(chat)) {
+      const key = tag.id || tag.label;
+      if (!/^rec[a-zA-Z0-9]+$/.test(tag.id) || options.has(key)) continue;
+      options.set(key, tag);
+    }
+  }
+
+  return Array.from(options.values()).sort((a, b) => a.label.localeCompare(b.label, "pt-BR", { sensitivity: "base" }));
+}
+
 export default function ChatsPage() {
   const [showDetails, setShowDetails] = useState(false);
 
@@ -80,6 +125,8 @@ export default function ChatsPage() {
   const [hasMoreSearchChats, setHasMoreSearchChats] = useState(false);
   const [isLoadingOlderMessages, setIsLoadingOlderMessages] = useState(false);
   const [hasMoreMessagesByChatId, setHasMoreMessagesByChatId] = useState<Record<string, boolean>>({});
+  const [statusOptions, setStatusOptions] = useState<ChatStatusOption[]>([]);
+  const [tagOptions, setTagOptions] = useState<ChatTag[]>([]);
   const [error, setError] = useState<string>();
 
   const isSearching = !!debouncedSearch.trim();
@@ -91,6 +138,10 @@ export default function ChatsPage() {
     return Array.from(indexedChats.values());
   }, [chats, searchChats]);
   const selectedChat = useMemo(() => knownChats.find((chat) => chat.id === selectedChatId), [knownChats, selectedChatId]);
+  const fallbackStatusOptions = useMemo(() => getFallbackStatusOptions(knownChats), [knownChats]);
+  const fallbackTagOptions = useMemo(() => getFallbackTagOptions(knownChats), [knownChats]);
+  const contactStatusOptions = statusOptions.length > 0 ? statusOptions : fallbackStatusOptions;
+  const contactTagOptions = tagOptions.length > 0 ? tagOptions : fallbackTagOptions;
   const selectedChatRemoteId = selectedChat?.chat_id;
   const messages = selectedChatRemoteId ? (messagesByChatId[selectedChatRemoteId] ?? []) : [];
   const hasMoreMessages = selectedChatRemoteId ? (hasMoreMessagesByChatId[selectedChatRemoteId] ?? false) : false;
@@ -423,6 +474,32 @@ export default function ChatsPage() {
   useEffect(() => {
     let isMounted = true;
 
+    fetch("/api/chat-options")
+      .then((response) => {
+        if (!response.ok) throw new Error(`Nao foi possivel carregar opcoes (${response.status}).`);
+        return response.json() as Promise<{ statuses?: ChatStatusOption[]; tags?: ChatTag[]; errors?: string[] }>;
+      })
+      .then((data) => {
+        if (!isMounted) return;
+        setStatusOptions(data.statuses ?? []);
+        setTagOptions(data.tags ?? []);
+        if (data.errors?.length) setError(data.errors.join(" | "));
+      })
+      .catch((err) => {
+        if (!isMounted) return;
+        setStatusOptions([]);
+        setTagOptions([]);
+        setError(err instanceof Error ? err.message : "Nao foi possivel carregar tags e status.");
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+
     fetchChats({ limit: CHAT_PAGE_SIZE, offset: 0 })
       .then((data) => {
         if (!isMounted) return;
@@ -582,6 +659,146 @@ export default function ChatsPage() {
   */
   };
 
+  const updateSelectedChatUnreadCount = useCallback(
+    (unreadCount: number) => {
+      if (!selectedChatId) return;
+
+      const updateUnreadCount = (list: ChatRecord[]) => list.map((chat) => (chat.id === selectedChatId ? { ...chat, unread_count: unreadCount } : chat));
+
+      setChats((current) => updateUnreadCount(current));
+      setSearchChats((current) => updateUnreadCount(current));
+    },
+    [selectedChatId],
+  );
+
+  const handleMarkAsRead = useCallback(() => {
+    updateSelectedChatUnreadCount(0);
+  }, [updateSelectedChatUnreadCount]);
+
+  const handleMarkAsUnread = useCallback(() => {
+    updateSelectedChatUnreadCount(Math.max(selectedChat?.unread_count || 0, 1));
+  }, [selectedChat?.unread_count, updateSelectedChatUnreadCount]);
+
+  const restoreSelectedChat = useCallback(
+    (previousChat: ChatRecord) => {
+      if (!selectedChatId) return;
+
+      const restoreChat = (list: ChatRecord[]) => list.map((chat) => (chat.id === selectedChatId ? previousChat : chat));
+
+      setChats((current) => restoreChat(current));
+      setSearchChats((current) => restoreChat(current));
+    },
+    [selectedChatId],
+  );
+
+  const updateSelectedChatTags = useCallback(
+    (tags: ChatTag[]) => {
+      if (!selectedChatId) return;
+
+      const updateTags = (list: ChatRecord[]) =>
+        list.map((chat) =>
+          chat.id === selectedChatId
+            ? {
+                ...chat,
+                json_tags: tags,
+                json_tags_parsed: tags,
+                tag_chat_array: tags,
+              }
+            : chat,
+        );
+
+      setChats((current) => updateTags(current));
+      setSearchChats((current) => updateTags(current));
+    },
+    [selectedChatId],
+  );
+
+  const handleChangeContactStatus = useCallback(
+    async (status: ChatStatusOption) => {
+      if (!selectedChat || !selectedChatId) return;
+      const previousChat = selectedChat;
+      const updatePatch = getStatusFields(selectedChat, status);
+
+      const updateStatus = (list: ChatRecord[]) =>
+        list.map((chat) =>
+          chat.id === selectedChatId
+            ? {
+                ...chat,
+                ...updatePatch,
+              }
+            : chat,
+        );
+
+      setChats((current) => updateStatus(current));
+      setSearchChats((current) => updateStatus(current));
+      setError(undefined);
+
+      try {
+        await updateChatDetails({
+          id: selectedChat.id,
+          ...updatePatch,
+        });
+      } catch (err) {
+        restoreSelectedChat(previousChat);
+        setError(err instanceof Error ? err.message : "Nao foi possivel salvar o status do contato.");
+      }
+    },
+    [restoreSelectedChat, selectedChat, selectedChatId],
+  );
+
+  const handleToggleContactTag = useCallback(
+    async (tag: ChatTag) => {
+      if (!selectedChat) return;
+
+      const previousChat = selectedChat;
+      const currentTags = getChatTags(selectedChat);
+      const tagKey = getTagKey(tag);
+      const hasTag = currentTags.some((currentTag) => getTagKey(currentTag) === tagKey);
+      const nextTags = hasTag ? currentTags.filter((currentTag) => getTagKey(currentTag) !== tagKey) : [...currentTags, tag];
+
+      updateSelectedChatTags(nextTags);
+      setError(undefined);
+
+      try {
+        await updateChatDetails({
+          id: selectedChat.id,
+          tags: nextTags,
+        });
+      } catch (err) {
+        restoreSelectedChat(previousChat);
+        setError(err instanceof Error ? err.message : "Nao foi possivel salvar as tags do contato.");
+      }
+    },
+    [restoreSelectedChat, selectedChat, updateSelectedChatTags],
+  );
+
+  const handleReorderTags = useCallback(
+    (tags: ChatTag[]) => {
+      updateSelectedChatTags(tags);
+    },
+    [updateSelectedChatTags],
+  );
+
+  const handleCommitTagOrder = useCallback(
+    async (tags: ChatTag[]) => {
+      if (!selectedChat) return;
+
+      const previousChat = selectedChat;
+      setError(undefined);
+
+      try {
+        await updateChatDetails({
+          id: selectedChat.id,
+          tags,
+        });
+      } catch (err) {
+        restoreSelectedChat(previousChat);
+        setError(err instanceof Error ? err.message : "Nao foi possivel salvar a ordem das tags.");
+      }
+    },
+    [restoreSelectedChat, selectedChat],
+  );
+
   return (
     <div className="flex h-screen overflow-hidden bg-background">
       <ContactList
@@ -626,7 +843,20 @@ export default function ChatsPage() {
           <>
             <PanelResizeHandle className="w-1 bg-(--chat-muted)/50 transition-colors hover:bg-(--chat-primary)/50" />
             <Panel defaultSize={30} minSize={26} maxSize={40} className="bg-(--chat-card) border-l border-(--chat-muted)">
-              <ContactDetails chat={selectedChat} onClose={() => setShowDetails(false)} onToggleStatus={handleToggleStatus} onToggleIA={handleToggleIA} />
+              <ContactDetails
+                chat={selectedChat}
+                onClose={() => setShowDetails(false)}
+                onToggleStatus={handleToggleStatus}
+                onToggleIA={handleToggleIA}
+                statusOptions={contactStatusOptions}
+                tagOptions={contactTagOptions}
+                onChangeStatus={handleChangeContactStatus}
+                onToggleTag={handleToggleContactTag}
+                onMarkAsRead={handleMarkAsRead}
+                onMarkAsUnread={handleMarkAsUnread}
+                onReorderTags={handleReorderTags}
+                onCommitTagOrder={handleCommitTagOrder}
+              />
             </Panel>
           </>
         )}
