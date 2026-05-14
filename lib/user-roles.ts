@@ -1,0 +1,54 @@
+export type UserRole = "admin" | "manager" | "user"
+
+export type CurrentUser = {
+  email: string
+  name: string
+  role: UserRole
+  source: "airtable" | "fallback" | "session"
+}
+
+export const FALLBACK_ADMIN_EMAILS = ["p.augustocardoso@gmail.com"]
+
+export function normalizeUserRole(value: unknown): UserRole {
+  if (typeof value !== "string") {
+    return "user"
+  }
+
+  const role = value.trim().toLowerCase()
+
+  if (["admin", "administrador", "administrator", "owner", "dono"].includes(role)) {
+    return "admin"
+  }
+
+  if (["manager", "gestor", "gerente", "supervisor", "coordenador"].includes(role)) {
+    return "manager"
+  }
+
+  return "user"
+}
+
+export function getRoleLabel(role: UserRole) {
+  const labels: Record<UserRole, string> = {
+    admin: "Administrador",
+    manager: "Gestor",
+    user: "Usuário",
+  }
+
+  return labels[role]
+}
+
+export function isFallbackAdminEmail(email: string) {
+  return FALLBACK_ADMIN_EMAILS.includes(email.trim().toLowerCase())
+}
+
+export function getDefaultUser(email: string): CurrentUser {
+  const normalizedEmail = email.trim().toLowerCase()
+  const role = isFallbackAdminEmail(normalizedEmail) ? "admin" : "user"
+
+  return {
+    email: normalizedEmail,
+    name: normalizedEmail,
+    role,
+    source: isFallbackAdminEmail(normalizedEmail) ? "fallback" : "session",
+  }
+}
