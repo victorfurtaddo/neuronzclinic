@@ -15,10 +15,12 @@ interface ProfileViewProps {
   contactPhone?: string;
   statusOptions?: ChatStatusOption[];
   tagOptions?: ChatTag[];
+  interestOptions?: ChatTag[];
   onChangeStatus?: (status: ChatStatusOption) => void;
   onToggleTag?: (tag: ChatTag) => void;
   onReorderTags?: (tags: ChatTag[]) => void;
   onCommitTagOrder?: (tags: ChatTag[]) => void;
+
 }
 
 function getDisplayName(chat?: ChatRecord) {
@@ -58,8 +60,10 @@ export function ProfileView({ chat, contactPhone, statusOptions = [], tagOptions
   const [draggedTagId, setDraggedTagId] = useState<string | null>(null);
   const pendingReorderedTagsRef = useRef<ChatTag[] | null>(null);
   const tags = getChatTags(chat);
+  const [selectedInterests, setSelectedInterests] = useState<ChatTag[]>([]);
   const selectedTagKeys = new Set(tags.flatMap((tag) => [tag.id, tag.label.toLowerCase()]));
   const availableTags = getMergedTags(tags, tagOptions);
+  const availableInterest = getMergedTags(selectedInterests, tagOptions);
   const availableStatuses = getMergedStatusOptions(
     [
       {
@@ -216,10 +220,71 @@ export function ProfileView({ chat, contactPhone, statusOptions = [], tagOptions
 
         <div className="mb-4">
           <label className="mb-1.5 block text-sm font-semibold text-foreground">Interesses</label>
-          <button className="flex w-full items-center justify-between rounded border border-border bg-card px-3 py-2 text-sm text-muted-foreground">
-            <span></span>
-            <ChevronDown className="h-4 w-4" />
-          </button>
+          <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button type="button" className="flex w-full flex-wrap items-center gap-2 rounded border border-border bg-card px-3 py-2 text-left">
+                    {selectedInterests.length > 0 ? (
+                      selectedInterests.map((interest) => (
+                        <span
+                          key={interest.id}
+                          draggable
+                          className={cn(
+                            "flex cursor-grab items-center gap-1 rounded bg-teal-600 px-2 py-0.5 text-xs font-medium text-white transition-opacity active:cursor-grabbing",
+                            draggedTagId === interest.id && "opacity-50",
+                          )}
+                          style={
+                            interest.color
+                              ? {
+                                  backgroundColor: interest.color,
+                                  color: getReadableTextColor(interest.color),
+                                }
+                              : undefined
+                          }
+                          onPointerDown={(event) => event.stopPropagation()}
+                          onDragStart={(event) => {
+                            event.dataTransfer.effectAllowed = "move";
+                            event.dataTransfer.setData("text/plain", interest.id);
+                            setDraggedTagId(interest.id);
+                          }}
+                          onDragEnter={() => moveTag(interest.id)}
+                          onDragOver={(event) => event.preventDefault()}
+                          onDragEnd={finishTagDrag}
+                        >
+                          <GripVertical className="h-3 w-3 opacity-60" />
+                          {interest.label}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="text-sm text-muted-foreground">Nenhum interesse</span>
+                    )}
+                    <ChevronDown className="ml-auto h-4 w-4 text-muted-foreground" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="z-[100] max-h-72 w-72">
+                  {availableInterest.length > 0 ? (
+                    availableInterest.map((interest) => (
+                      <DropdownMenuCheckboxItem
+                        key={interest.id || interest.label}
+                        checked={selectedInterests.some((i) => i.id === interest.id)}
+                        className="cursor-pointer"
+                        onSelect={(event) => event.preventDefault()}
+                        onCheckedChange={() => {
+                          setSelectedInterests((prev) =>
+                            prev.some((i) => i.id === interest.id)
+                              ? prev.filter((i) => i.id !== interest.id)
+                              : [...prev, interest]
+                          );
+                        }}
+                      >
+                        <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: interest.color || "#0d9488" }} />
+                        <span className="truncate">{interest.label}</span>
+                      </DropdownMenuCheckboxItem>
+                    ))
+                  ) : (
+                    <DropdownMenuItem disabled>Nenhum interesse encontrado</DropdownMenuItem>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
         </div>
 
         <div className="mb-4">
