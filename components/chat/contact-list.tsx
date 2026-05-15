@@ -1,38 +1,45 @@
-"use client"
+"use client";
 
-import type { UIEvent } from "react"
-import { useEffect, useMemo, useState } from "react"
-import { Bot, ChevronDown, ChevronUp, Contact, Filter, FilterX, Pencil, Search, SlidersHorizontal, SquarePlus } from "lucide-react"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Switch } from "@/components/ui/switch"
-import { getChatTags, getReadableTextColor } from "@/lib/chat-tags"
-import { getChatStatusColor, getChatStatusLabel } from "@/lib/chat-status"
-import { cn } from "@/lib/utils"
-import { ChatRecord, LatestMessageStatus } from "@/lib/supabase-rest"
-import { MessageStatusIcon } from "./message-status-icon"
+import type { UIEvent } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { Bot, ChevronDown, ChevronUp, Contact, Feather, Filter, FilterX, HatGlasses, Pencil, Repeat, Search, SlidersHorizontal, SquarePlus } from "lucide-react";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import { getChatTags, getReadableTextColor } from "@/lib/chat-tags";
+import { getChatStatusColor, getChatStatusLabel } from "@/lib/chat-status";
+import { cn } from "@/lib/utils";
+import { ChatRecord, LatestMessageStatus } from "@/lib/supabase-rest";
+import { MessageStatusIcon } from "./message-status-icon";
+import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
+import { TooltipProvider } from "@radix-ui/react-tooltip";
 
 interface ContactListProps {
-  chats: ChatRecord[]
-  search: string
-  isLoading?: boolean
-  isLoadingMore?: boolean
-  isSearching?: boolean
-  hasMore?: boolean
-  selectedId?: string
-  latestMessageStatuses?: Record<string, LatestMessageStatus>
-  onSearchChange?: (value: string) => void
-  onSelect?: (id: string) => void
-  onLoadMore?: () => void
+  chats: ChatRecord[];
+  search: string;
+  isLoading?: boolean;
+  isLoadingMore?: boolean;
+  isSearching?: boolean;
+  hasMore?: boolean;
+  selectedId?: string;
+  latestMessageStatuses?: Record<string, LatestMessageStatus>;
+  onSearchChange?: (value: string) => void;
+  onSelect?: (id: string) => void;
+  onLoadMore?: () => void;
+
+  isAssinaturaMode: boolean;
+  onToggleAssinatura: (checked: boolean) => void;
+  isGhostMode: boolean;
+  onToggleGhost: (checked: boolean) => void;
 }
 
-const ALL_FILTERS = "all"
+const ALL_FILTERS = "all";
 
 function getDisplayName(chat: ChatRecord) {
-  return chat.nome_contato || chat.pushname || chat.chat_id?.replace("@s.whatsapp.net", "") || "Contato sem nome"
+  return chat.nome_contato || chat.pushname || chat.chat_id?.replace("@s.whatsapp.net", "") || "Contato sem nome";
 }
 
 function getInitials(name: string) {
@@ -42,7 +49,7 @@ function getInitials(name: string) {
     .map((part) => part[0])
     .slice(0, 2)
     .join("")
-    .toUpperCase()
+    .toUpperCase();
 }
 
 function getTime(chat: ChatRecord) {
@@ -51,173 +58,162 @@ function getTime(chat: ChatRecord) {
       hour: "2-digit",
       minute: "2-digit",
       timeZone: "America/Sao_Paulo",
-    }).format(new Date(chat.last_message_time))
+    }).format(new Date(chat.last_message_time));
   }
 
-  return chat.last_time_formatado ?? ""
+  return chat.last_time_formatado ?? "";
 }
 
 function getFilterValues(value: unknown): string[] {
-  if (value === null || value === undefined) return []
+  if (value === null || value === undefined) return [];
 
   if (typeof value === "string") {
-    const trimmed = value.trim()
-    return trimmed ? [trimmed] : []
+    const trimmed = value.trim();
+    return trimmed ? [trimmed] : [];
   }
 
   if (typeof value === "number" || typeof value === "boolean") {
-    return [String(value)]
+    return [String(value)];
   }
 
   if (Array.isArray(value)) {
-    return value.flatMap(getFilterValues)
+    return value.flatMap(getFilterValues);
   }
 
   if (typeof value === "object") {
-    const source = "fields" in value && value.fields && typeof value.fields === "object" ? value.fields : value
-    const record = source as Record<string, unknown>
-    const candidate = record.Nome || record.nome || record.Name || record.name || record.label || record.Setor || record.setor
+    const source = "fields" in value && value.fields && typeof value.fields === "object" ? value.fields : value;
+    const record = source as Record<string, unknown>;
+    const candidate = record.Nome || record.nome || record.Name || record.name || record.label || record.Setor || record.setor;
 
-    return getFilterValues(candidate)
+    return getFilterValues(candidate);
   }
 
-  return []
+  return [];
 }
 
 function getUniqueOptions(values: unknown[]) {
-  return Array.from(new Set(values.flatMap(getFilterValues))).sort((a, b) =>
-    a.localeCompare(b, "pt-BR", { sensitivity: "base" }),
-  )
+  return Array.from(new Set(values.flatMap(getFilterValues))).sort((a, b) => a.localeCompare(b, "pt-BR", { sensitivity: "base" }));
 }
 
 function getSectorIds(value: unknown) {
-  return getFilterValues(value).filter((sector) => /^rec[a-zA-Z0-9]+$/.test(sector))
+  return getFilterValues(value).filter((sector) => /^rec[a-zA-Z0-9]+$/.test(sector));
 }
 
 function getSectorLabel(id: string, labels: Record<string, string>) {
-  return labels[id] || id
+  return labels[id] || id;
 }
 
-export function ContactList({
-  chats,
-  search,
-  isLoading,
-  isLoadingMore,
-  isSearching,
-  hasMore,
-  selectedId,
-  latestMessageStatuses = {},
-  onSearchChange,
-  onSelect,
+export function ContactList({ 
+  chats, 
+  search, 
+  isLoading, 
+  isLoadingMore, 
+  isSearching, 
+  hasMore, 
+  selectedId, 
+  latestMessageStatuses = {}, 
+  onSearchChange, 
+  onSelect, 
   onLoadMore,
+  isAssinaturaMode,
+  onToggleAssinatura,
+  isGhostMode,
+  onToggleGhost
 }: ContactListProps) {
-  const [isFiltersOpen, setIsFiltersOpen] = useState(false)
-  const [statusFilter, setStatusFilter] = useState(ALL_FILTERS)
-  const [tagFilter, setTagFilter] = useState(ALL_FILTERS)
-  const [sectorFilter, setSectorFilter] = useState(ALL_FILTERS)
-  const [sectorLabels, setSectorLabels] = useState<Record<string, string>>({})
-  const [sectorCatalog, setSectorCatalog] = useState<string[]>([])
+  const [isFiltersOpen, setIsFiltersOpen] = useState(false);
+  const [statusFilter, setStatusFilter] = useState(ALL_FILTERS);
+  const [tagFilter, setTagFilter] = useState(ALL_FILTERS);
+  const [sectorFilter, setSectorFilter] = useState(ALL_FILTERS);
+  const [sectorLabels, setSectorLabels] = useState<Record<string, string>>({});
+  const [sectorCatalog, setSectorCatalog] = useState<string[]>([]);
 
-  const statusOptions = useMemo(() => getUniqueOptions(chats.map(getChatStatusLabel)), [chats])
-  const tagOptions = useMemo(
-    () => getUniqueOptions(chats.flatMap((chat) => getChatTags(chat).map((tag) => tag.label))),
-    [chats],
-  )
-  const sectorIds = useMemo(
-    () => Array.from(new Set(chats.flatMap((chat) => getSectorIds(chat.setor)))),
-    [chats],
-  )
-  const sectorOptions = useMemo(
-    () =>
-      sectorCatalog.length > 0
-        ? sectorCatalog
-        : getUniqueOptions(sectorIds.map((id) => getSectorLabel(id, sectorLabels))),
-    [sectorCatalog, sectorIds, sectorLabels],
-  )
+  const statusOptions = useMemo(() => getUniqueOptions(chats.map(getChatStatusLabel)), [chats]);
+  const tagOptions = useMemo(() => getUniqueOptions(chats.flatMap((chat) => getChatTags(chat).map((tag) => tag.label))), [chats]);
+  const sectorIds = useMemo(() => Array.from(new Set(chats.flatMap((chat) => getSectorIds(chat.setor)))), [chats]);
+  const sectorOptions = useMemo(() => (sectorCatalog.length > 0 ? sectorCatalog : getUniqueOptions(sectorIds.map((id) => getSectorLabel(id, sectorLabels)))), [sectorCatalog, sectorIds, sectorLabels]);
 
-  const hasActiveFilters =
-    statusFilter !== ALL_FILTERS || tagFilter !== ALL_FILTERS || sectorFilter !== ALL_FILTERS
+  const hasActiveFilters = statusFilter !== ALL_FILTERS || tagFilter !== ALL_FILTERS || sectorFilter !== ALL_FILTERS;
 
   useEffect(() => {
-    let isMounted = true
+    let isMounted = true;
 
     fetch("/api/airtable/sectors")
       .then((response) => response.json() as Promise<{ labels?: Record<string, string>; sectors?: string[] }>)
       .then((data) => {
-        if (!isMounted) return
-        setSectorLabels((current) => ({ ...current, ...(data.labels ?? {}) }))
-        setSectorCatalog(data.sectors ?? [])
+        if (!isMounted) return;
+        setSectorLabels((current) => ({ ...current, ...(data.labels ?? {}) }));
+        setSectorCatalog(data.sectors ?? []);
       })
       .catch(() => {
-        if (!isMounted) return
-        setSectorCatalog([])
-      })
+        if (!isMounted) return;
+        setSectorCatalog([]);
+      });
 
     return () => {
-      isMounted = false
-    }
-  }, [])
+      isMounted = false;
+    };
+  }, []);
 
   useEffect(() => {
-    const missingSectorIds = sectorIds.filter((id) => !sectorLabels[id])
+    const missingSectorIds = sectorIds.filter((id) => !sectorLabels[id]);
 
-    if (missingSectorIds.length === 0) return
+    if (missingSectorIds.length === 0) return;
 
-    let isMounted = true
+    let isMounted = true;
 
     fetch(`/api/airtable/sectors?ids=${encodeURIComponent(missingSectorIds.join(","))}`)
       .then((response) => response.json() as Promise<{ labels?: Record<string, string>; sectors?: string[] }>)
       .then((data) => {
-        if (!isMounted) return
+        if (!isMounted) return;
         setSectorLabels((current) => ({
           ...current,
           ...Object.fromEntries(missingSectorIds.map((id) => [id, id])),
           ...(data.labels ?? {}),
-        }))
-        if (data.sectors?.length) setSectorCatalog(data.sectors)
+        }));
+        if (data.sectors?.length) setSectorCatalog(data.sectors);
       })
       .catch(() => {
-        if (!isMounted) return
+        if (!isMounted) return;
         setSectorLabels((current) => ({
           ...current,
           ...Object.fromEntries(missingSectorIds.map((id) => [id, current[id] || id])),
-        }))
-      })
+        }));
+      });
 
     return () => {
-      isMounted = false
-    }
-  }, [sectorIds, sectorLabels])
+      isMounted = false;
+    };
+  }, [sectorIds, sectorLabels]);
 
   const filteredChats = useMemo(() => {
     return chats.filter((chat) => {
-      if (statusFilter !== ALL_FILTERS && getChatStatusLabel(chat) !== statusFilter) return false
+      if (statusFilter !== ALL_FILTERS && getChatStatusLabel(chat) !== statusFilter) return false;
       if (
         sectorFilter !== ALL_FILTERS &&
         !getSectorIds(chat.setor)
           .map((id) => getSectorLabel(id, sectorLabels))
           .includes(sectorFilter)
       ) {
-        return false
+        return false;
       }
-      if (tagFilter !== ALL_FILTERS && !getChatTags(chat).some((tag) => tag.label === tagFilter)) return false
+      if (tagFilter !== ALL_FILTERS && !getChatTags(chat).some((tag) => tag.label === tagFilter)) return false;
 
-      return true
-    })
-  }, [chats, sectorFilter, sectorLabels, statusFilter, tagFilter])
+      return true;
+    });
+  }, [chats, sectorFilter, sectorLabels, statusFilter, tagFilter]);
 
   function clearFilters() {
-    setStatusFilter(ALL_FILTERS)
-    setTagFilter(ALL_FILTERS)
-    setSectorFilter(ALL_FILTERS)
+    setStatusFilter(ALL_FILTERS);
+    setTagFilter(ALL_FILTERS);
+    setSectorFilter(ALL_FILTERS);
   }
 
   function handleListScroll(event: UIEvent<HTMLDivElement>) {
-    const target = event.currentTarget
-    const distanceFromBottom = target.scrollHeight - target.scrollTop - target.clientHeight
+    const target = event.currentTarget;
+    const distanceFromBottom = target.scrollHeight - target.scrollTop - target.clientHeight;
 
     if (distanceFromBottom < 160 && hasMore && !isLoadingMore && !search.trim()) {
-      onLoadMore?.()
+      onLoadMore?.();
     }
   }
 
@@ -225,25 +221,46 @@ export function ContactList({
     <div className="flex h-full w-[340px] shrink-0 flex-col border-r border-border bg-card">
       <div className="flex items-center gap-2 border-b border-border px-4 py-3">
         <Avatar className="h-9 w-9">
-          <AvatarFallback className="bg-gradient-to-br from-teal-600 to-teal-800 text-xs text-white">
-            P
-          </AvatarFallback>
+          <AvatarFallback className="bg-gradient-to-br from-teal-600 to-teal-800 text-xs text-white">P</AvatarFallback>
         </Avatar>
         <span className="font-medium text-foreground">Pedro</span>
 
         <div className="ml-auto flex items-center gap-3">
           <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground">
-            <SlidersHorizontal className="h-4 w-4" />
+            <Repeat className="h-4 w-4" />
           </Button>
-          <div className="flex items-center">
-            <Pencil className="mr-1 h-3.5 w-3.5 text-muted-foreground" />
-            <Switch className="scale-75 data-[state=checked]:bg-primary" />
-          </div>
-          <div className="flex items-center">
-            <Bot className="mr-1 h-4 w-4 text-muted-foreground" />
-            <Switch className="scale-75 data-[state=checked]:bg-primary" defaultChecked />
-          </div>
-          <Contact className="h-4 w-4 cursor-pointer text-muted-foreground" />
+          <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className="flex items-center">
+                    <Feather className="mr-1 h-3.5 w-3.5 text-muted-foreground" />
+                    <Switch 
+                      className="scale-75 data-[state=checked]:bg-primary" 
+                      checked={isAssinaturaMode}
+                      onCheckedChange={onToggleAssinatura}
+                    />
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" align="start">
+                  <p className="text-xs font-medium">Modo assinatura</p>
+                </TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className="flex items-center">
+                    <HatGlasses className="mr-1 h-4 w-4 text-muted-foreground" />
+                    <Switch 
+                      className="scale-75 data-[state=checked]:bg-primary" 
+                      checked={isGhostMode}
+                      onCheckedChange={onToggleGhost}
+                    />
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" align="start">
+                  <p className="text-xs font-medium">Não visualizar mensagens</p>
+                </TooltipContent>
+              </Tooltip>
+          </TooltipProvider>
         </div>
       </div>
 
@@ -251,30 +268,12 @@ export function ContactList({
         <div className="flex items-center gap-2">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={search}
-              onChange={(event) => onSearchChange?.(event.target.value)}
-              placeholder="Procure a conversa"
-              className="h-9 border-0 bg-secondary pl-9 text-sm"
-            />
+            <Input value={search} onChange={(event) => onSearchChange?.(event.target.value)} placeholder="Procure a conversa" className="h-9 border-0 bg-secondary pl-9 text-sm" />
           </div>
-          <Button
-            variant="ghost"
-            size="icon"
-            className={cn("h-9 w-9 text-muted-foreground hover:text-foreground", hasActiveFilters && "text-foreground")}
-            onClick={clearFilters}
-            title="Limpar filtros"
-            aria-label="Limpar filtros"
-          >
+          <Button variant="ghost" size="icon" className={cn("h-9 w-9 text-muted-foreground hover:text-foreground", hasActiveFilters && "text-foreground")} onClick={clearFilters} title="Limpar filtros" aria-label="Limpar filtros">
             <FilterX className="h-4 w-4" />
           </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-9 w-9 text-muted-foreground hover:text-foreground"
-            title="Novo contato"
-            aria-label="Novo contato"
-          >
+          <Button variant="ghost" size="icon" className="h-9 w-9 text-muted-foreground hover:text-foreground" title="Novo contato" aria-label="Novo contato">
             <SquarePlus className="h-4 w-4" />
           </Button>
         </div>
@@ -282,19 +281,12 @@ export function ContactList({
 
       <div className="border-b border-border bg-muted/80">
         <div className="flex h-10 items-center justify-between px-3">
-          <button
-            className="text-sm font-semibold text-foreground"
-            onClick={() => setIsFiltersOpen((current) => !current)}
-          >
+          <button className="text-sm font-semibold text-foreground" onClick={() => setIsFiltersOpen((current) => !current)}>
             Filtros
           </button>
           <div className="flex items-center gap-3">
             <Filter className="h-3.5 w-3.5 text-muted-foreground" />
-            <button
-              className="text-muted-foreground hover:text-foreground"
-              onClick={() => setIsFiltersOpen((current) => !current)}
-              aria-label={isFiltersOpen ? "Ocultar filtros" : "Mostrar filtros"}
-            >
+            <button className="text-muted-foreground hover:text-foreground" onClick={() => setIsFiltersOpen((current) => !current)} aria-label={isFiltersOpen ? "Ocultar filtros" : "Mostrar filtros"}>
               {isFiltersOpen ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
             </button>
           </div>
@@ -354,25 +346,20 @@ export function ContactList({
           <div className="p-4 text-sm text-muted-foreground">Nenhuma conversa encontrada.</div>
         ) : (
           filteredChats.map((chat) => {
-            const name = getDisplayName(chat)
-            const tags = getChatTags(chat).slice(0, 3)
-            const latestStatus = latestMessageStatuses[chat.chat_id]
+            const name = getDisplayName(chat);
+            const tags = getChatTags(chat).slice(0, 3);
+            const latestStatus = latestMessageStatuses[chat.chat_id];
 
             return (
               <button
                 key={chat.id}
                 onClick={() => onSelect?.(chat.id)}
-                className={cn(
-                  "flex w-full items-start gap-3 border-b border-border/50 p-3 text-left transition-colors hover:bg-secondary/50",
-                  selectedId === chat.id && "bg-secondary",
-                )}
+                className={cn("flex w-full items-start gap-3 border-b border-border/50 p-3 text-left transition-colors hover:bg-secondary/50", selectedId === chat.id && "bg-secondary")}
               >
                 <div className="relative h-11 w-11 shrink-0">
                   <Avatar className="h-11 w-11">
                     <AvatarImage src={chat.url_foto_perfil ?? undefined} alt={name} />
-                    <AvatarFallback className="bg-muted text-sm font-medium text-muted-foreground">
-                      {getInitials(name)}
-                    </AvatarFallback>
+                    <AvatarFallback className="bg-muted text-sm font-medium text-muted-foreground">{getInitials(name)}</AvatarFallback>
                   </Avatar>
                   <span
                     className="absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full border-2 border-card"
@@ -389,21 +376,9 @@ export function ContactList({
                   </div>
 
                   <div className="mt-0.5 flex items-center gap-1">
-                    {chat.text_last_message && (
-                      <MessageStatusIcon
-                        fromMe={chat.last_message_fromMe}
-                        status={latestStatus?.status}
-                        timestamp={latestStatus?.timestamp_msg ?? chat.last_message_time}
-                      />
-                    )}
-                    <p className="truncate text-sm text-muted-foreground">
-                      {chat.text_last_message || "Sem mensagens recentes"}
-                    </p>
-                    {!!chat.unread_count && (
-                      <Badge className="ml-auto h-5 min-w-5 shrink-0 bg-green-500 px-1.5 text-[10px] font-medium text-white">
-                        {chat.unread_count}
-                      </Badge>
-                    )}
+                    {chat.text_last_message && <MessageStatusIcon fromMe={chat.last_message_fromMe} status={latestStatus?.status} timestamp={latestStatus?.timestamp_msg ?? chat.last_message_time} />}
+                    <p className="truncate text-sm text-muted-foreground">{chat.text_last_message || "Sem mensagens recentes"}</p>
+                    {!!chat.unread_count && <Badge className="ml-auto h-5 min-w-5 shrink-0 bg-green-500 px-1.5 text-[10px] font-medium text-white">{chat.unread_count}</Badge>}
                   </div>
 
                   {tags.length > 0 && (
@@ -428,18 +403,13 @@ export function ContactList({
                   )}
                 </div>
               </button>
-            )
+            );
           })
         )}
         {!isLoading && !search.trim() && (
           <div className="p-3">
             {hasMore ? (
-              <Button
-                variant="ghost"
-                className="h-9 w-full text-sm text-muted-foreground"
-                disabled={isLoadingMore}
-                onClick={onLoadMore}
-              >
+              <Button variant="ghost" className="h-9 w-full text-sm text-muted-foreground" disabled={isLoadingMore} onClick={onLoadMore}>
                 {isLoadingMore ? "Carregando mais conversas..." : "Carregar mais conversas"}
               </Button>
             ) : chats.length > 0 ? (
@@ -449,5 +419,5 @@ export function ContactList({
         )}
       </div>
     </div>
-  )
+  );
 }

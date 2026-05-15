@@ -392,7 +392,7 @@ const MessageBubble = memo(
                   onScrollToMessage(quotedOriginal.id);
                 }}
                 className={cn(
-                  "mb-2 overflow-hidden rounded-md border-l-4 px-2.5 py-2 shadow-[inset_0_0_0_1px_rgba(17,27,33,0.035)] cursor-pointer hover:opacity-90 transition-opacity",
+                  "mb-2 overflow-hidden rounded-md border-l-4 px-2.5 py-2 shadow-[inset_0_0_0_1px_rgba(17,27,33,0.035)] cursor-pointer hover:opacity-80 transition-opacity",
                   fromMe ? "bg-[#c8f4c2] dark:bg-[#0f3f2d]" : "bg-[#f5f6f6] dark:bg-[#1d1e1e]",
                   quotedMessage.fromMe ? "border-l-[#00a884]" : "border-l-[#53bdeb]",
                 )}

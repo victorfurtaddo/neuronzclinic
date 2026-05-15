@@ -128,6 +128,8 @@ export default function ChatsPage() {
   const [statusOptions, setStatusOptions] = useState<ChatStatusOption[]>([]);
   const [tagOptions, setTagOptions] = useState<ChatTag[]>([]);
   const [error, setError] = useState<string>();
+  const [isAssinaturaMode, setIsAssinaturaMode] = useState(false);
+  const [isGhostMode, setIsGhostMode] = useState(true);
 
   const isSearching = !!debouncedSearch.trim();
   const isSearchingChats = isSearching && searchChatsTerm !== debouncedSearch.trim();
@@ -656,6 +658,12 @@ export default function ChatsPage() {
     updateSelectedChatUnreadCount(0);
   }, [updateSelectedChatUnreadCount]);
 
+  useEffect(() => {
+    if (selectedChatId && !isGhostMode) {
+      handleMarkAsRead();
+    }
+  }, [selectedChatId, isGhostMode, handleMarkAsRead]);
+
   const handleMarkAsUnread = useCallback(() => {
     updateSelectedChatUnreadCount(Math.max(selectedChat?.unread_count || 0, 1));
   }, [selectedChat?.unread_count, updateSelectedChatUnreadCount]);
@@ -794,6 +802,10 @@ export default function ChatsPage() {
         onSearchChange={setSearch}
         onSelect={setSelectedChatId}
         onLoadMore={loadMoreChats}
+        isAssinaturaMode={isAssinaturaMode}
+        onToggleAssinatura={setIsAssinaturaMode}
+        isGhostMode={isGhostMode}
+        onToggleGhost={setIsGhostMode}
       />
 
       <PanelGroup direction="horizontal" className="flex-1">
