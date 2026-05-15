@@ -145,7 +145,7 @@ export function ContactDetails({
             <div className="flex flex-col items-center gap-1">
               <Switch
                 checked={!!chat?.ia_responde}
-                onCheckedChange={onToggleIA} // Chama a função que criamos no pai
+                onCheckedChange={onToggleIA}
                 className="data-[state=checked]:bg-[#22c55e]"
               />
               <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">IA</span>
@@ -159,6 +159,7 @@ export function ContactDetails({
           {activeView === "profile" ? (
             <ProfileView
               chat={chat}
+              contactPhone={contactPhone}
               statusOptions={statusOptions}
               tagOptions={tagOptions}
               onChangeStatus={onChangeStatus}
@@ -167,7 +168,7 @@ export function ContactDetails({
               onCommitTagOrder={onCommitTagOrder}
             />
           ) : (
-            <IATrainingView chat={chat} />
+            <IATrainingView/>
           )}
         </div>
       </div>

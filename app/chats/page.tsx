@@ -626,13 +626,7 @@ export default function ChatsPage() {
     setChats((current) => toggleStatus(current));
     setSearchChats((current) => toggleStatus(current));
 
-    // 3. Persistência (Chamada de API)
-    // try {
-    //   await api.patch(`/chats/${selectedChat.id}`, { finalizada: newStatus });
-    // } catch (error) {
-    //   console.error("Erro ao atualizar status", error);
-    //   // Opcional: Reverter o estado em caso de erro (Rollback)
-    // }
+    //adicionar persistencia de dados
   };
 
   const handleToggleIA = () => {
@@ -643,20 +637,7 @@ export default function ChatsPage() {
     setChats((current) => toggleIAStatus(current));
     setSearchChats((current) => toggleIAStatus(current));
 
-    // 3. Persistência de Dados (Comentado)
-    /*
-  const chatToUpdate = chats.find(c => c.id === selectedChatId);
-  if (chatToUpdate) {
-    try {
-      await api.patch(`/chats/${selectedChatId}/config`, { 
-        ia_responde: !chatToUpdate.ia_responde 
-      });
-    } catch (err) {
-      console.error("Erro ao salvar configuração de IA:", err);
-      // Opcional: Reverter o estado local em caso de falha (Rollback)
-    }
-  }
-  */
+    //adicionar persistencia de dados
   };
 
   const updateSelectedChatUnreadCount = useCallback(

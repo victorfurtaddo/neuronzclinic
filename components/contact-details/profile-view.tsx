@@ -1,16 +1,18 @@
 import { ChatRecord } from "@/lib/supabase-rest";
 import { Input } from "../ui/input";
 import { Button } from "../ui/button";
-import { Calendar, ChevronDown, FileText, Pencil } from "lucide-react";
+import { Calendar, ChevronDown, FileText, Pencil, GripVertical, Check } from "lucide-react";
 import { useRef, useState } from "react";
 import type { ChatTag } from "@/lib/chat-tags";
 import { getChatTags, getReadableTextColor } from "@/lib/chat-tags";
 import { getChatStatusColor, getChatStatusLabel, type ChatStatusOption } from "@/lib/chat-status";
 import { cn } from "@/lib/utils";
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../ui/dropdown-menu";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "../ui/accordion";
 
 interface ProfileViewProps {
   chat?: ChatRecord;
+  contactPhone?: string;
   statusOptions?: ChatStatusOption[];
   tagOptions?: ChatTag[];
   onChangeStatus?: (status: ChatStatusOption) => void;
@@ -49,9 +51,10 @@ function getMergedStatusOptions(...groups: ChatStatusOption[][]) {
   return Array.from(statuses.values());
 }
 
-export function ProfileView({ chat, statusOptions = [], tagOptions = [], onChangeStatus, onToggleTag, onReorderTags, onCommitTagOrder }: ProfileViewProps) {
+export function ProfileView({ chat, contactPhone, statusOptions = [], tagOptions = [], onChangeStatus, onToggleTag, onReorderTags, onCommitTagOrder }: ProfileViewProps) {
   const [bottomTab, setBottomTab] = useState<"consultas" | "avisos">("consultas");
-  const [infoExpanded, setInfoExpanded] = useState(true);
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [editNameValue, setEditNameValue] = useState("");
   const [draggedTagId, setDraggedTagId] = useState<string | null>(null);
   const pendingReorderedTagsRef = useRef<ChatTag[] | null>(null);
   const tags = getChatTags(chat);
@@ -95,14 +98,39 @@ export function ProfileView({ chat, statusOptions = [], tagOptions = [], onChang
     }
   }
 
+  function handleEditNameToggle() {
+    if (isEditingName) {
+      setIsEditingName(false);
+    } else {
+      setEditNameValue(getDisplayName(chat));
+      setIsEditingName(true);
+    }
+
+    //adicionar persistencia de dados
+  }
+
   return (
     <>
       <div className="flex-1 overflow-y-auto p-4">
         <div className="mb-4">
           <div className="flex items-center gap-2">
-            <Input value={getDisplayName(chat)} readOnly />
-            <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground">
-              <Pencil className="h-4 w-4" />
+            <Input 
+              value={isEditingName ? editNameValue : getDisplayName(chat)} 
+              readOnly={!isEditingName} 
+              onChange={(e) => setEditNameValue(e.target.value)}
+              className={cn("transition-all", isEditingName && "border-primary ring-1 ring-primary")}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleEditNameToggle();
+                if (e.key === "Escape") setIsEditingName(false);
+              }}
+            />
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              className="h-8 w-8 text-muted-foreground shrink-0"
+              onClick={handleEditNameToggle}
+            >
+              {isEditingName ? <Check className="h-4 w-4 text-green-500" /> : <Pencil className="h-4 w-4" />}
             </Button>
           </div>
         </div>
@@ -154,24 +182,51 @@ export function ProfileView({ chat, statusOptions = [], tagOptions = [], onChang
         </div>
 
         <div className="mb-4">
-          <button onClick={() => setInfoExpanded(!infoExpanded)} className="flex w-full items-center justify-between py-2 text-sm font-medium text-foreground">
-            Informações do contato
-            <ChevronDown className={cn("h-4 w-4 transition-transform", infoExpanded && "rotate-180")} />
+          <Accordion type="single" collapsible defaultValue="contact-info">
+            <AccordionItem value="contact-info" className="border-none rounded-md bg-muted/60 px-3">
+              <AccordionTrigger className="py-3 text-sm font-semibold text-foreground hover:no-underline">
+                Informações do contato
+              </AccordionTrigger>
+              <AccordionContent>
+                <div className="mt-1 grid grid-cols-2 gap-3 pb-1">
+                  <div>
+                    <label className="mb-1.5 block text-sm font-semibold text-foreground">Cidade residência</label>
+                    <Input className="h-8 bg-background text-sm" />
+                  </div>
+                  <div>
+                    <label className="mb-1.5 block text-sm font-semibold text-foreground">Cidade desejada</label>
+                    <Input className="h-8 bg-background text-sm" />
+                  </div>
+                  <div>
+                    <label className="mb-1.5 block text-sm font-semibold text-foreground">Email</label>
+                    <Input className="h-8 bg-background text-sm" type="email" />
+                  </div>
+                  <div>
+                    <label className="mb-1.5 block text-sm font-semibold text-foreground">Celular</label>
+                    <Input
+                      className="h-8 bg-background text-sm"
+                      defaultValue={contactPhone || chat?.phone_contact || ""}
+                    />
+                  </div>
+                </div>
+              </AccordionContent>
+            </AccordionItem>
+          </Accordion>
+        </div>
+
+        <div className="mb-4">
+          <label className="mb-1.5 block text-sm font-semibold text-foreground">Interesses</label>
+          <button className="flex w-full items-center justify-between rounded border border-border bg-card px-3 py-2 text-sm text-muted-foreground">
+            <span></span>
+            <ChevronDown className="h-4 w-4" />
           </button>
         </div>
 
-        {infoExpanded && (
-          <>
-            <div className="mb-4">
-              <label className="mb-1.5 block text-sm font-medium text-foreground">Interesses</label>
-              <button className="flex w-full items-center justify-between rounded border border-border bg-card px-3 py-2 text-sm text-muted-foreground">
-                <span></span>
-                <ChevronDown className="h-4 w-4" />
-              </button>
-            </div>
-
-            <div className="mb-4">
-              <label className="mb-1.5 block text-sm font-medium text-foreground">Tags do contato</label>
+        <div className="mb-4">
+          <div className="mb-1.5">
+            <label className="block text-sm font-semibold text-foreground">Tags do contato</label>
+            <p className="mt-0.5 text-[11px] text-muted-foreground">Arraste para reordenar. As 3 primeiras aparecem na lista.</p>
+          </div>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <button type="button" className="flex w-full flex-wrap items-center gap-2 rounded border border-border bg-card px-3 py-2 text-left">
@@ -192,7 +247,7 @@ export function ProfileView({ chat, statusOptions = [], tagOptions = [], onChang
                                 }
                               : undefined
                           }
-                          onClick={(event) => event.stopPropagation()}
+                          onPointerDown={(event) => event.stopPropagation()}
                           onDragStart={(event) => {
                             event.dataTransfer.effectAllowed = "move";
                             event.dataTransfer.setData("text/plain", tag.id);
@@ -202,6 +257,7 @@ export function ProfileView({ chat, statusOptions = [], tagOptions = [], onChang
                           onDragOver={(event) => event.preventDefault()}
                           onDragEnd={finishTagDrag}
                         >
+                          <GripVertical className="h-3 w-3 opacity-60" />
                           {tag.label}
                         </span>
                       ))
@@ -233,11 +289,9 @@ export function ProfileView({ chat, statusOptions = [], tagOptions = [], onChang
             </div>
 
             <div className="mb-4">
-              <label className="mb-1.5 block text-sm font-medium text-foreground">Anotações</label>
+              <label className="mb-1.5 block text-sm font-semibold text-foreground">Anotações</label>
               <textarea className="min-h-[100px] w-full resize-none rounded border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring" placeholder="" />
             </div>
-          </>
-        )}
       </div>
 
       <div className="border-t border-border">

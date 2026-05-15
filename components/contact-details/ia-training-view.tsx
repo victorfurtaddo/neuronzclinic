@@ -1,18 +1,14 @@
-import { ChatRecord } from "@/lib/supabase-rest";
 import { Button } from "../ui/button";
 import { Send } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { Textarea } from "../ui/textarea";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "../ui/accordion";
 
-interface IATrainingViewProps {
-  chat?: ChatRecord;
-}
 
-// vetor para os dados
+// Dados
 const trainingData = [{ id: 1, date: "12/05/26 15:48", received: "Teste", iaResponse: "Olá! Que bom receber seu contato...", quality: "Avaliar" }];
 
-export function IATrainingView({ chat }: IATrainingViewProps) {
+export function IATrainingView() {
   return (
     <div className="p-4 space-y-4 animate-in fade-in slide-in-from-right-4">
       <Accordion type="single" collapsible className="w-full space-y-3">
