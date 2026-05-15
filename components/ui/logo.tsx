@@ -22,7 +22,7 @@ export function Logo({ isCollapsed }: LogoProps) {
     return <div className={cn("h-10", isCollapsed ? "w-10" : "w-32")} />;
   }
 
-  let src = "/logo-full-dark.png";
+  let src = "/logos/logo-full-dark.png";
 
   if (isCollapsed) {
     src = resolvedTheme === "dark" ? "/logos/logo-icon-dark.png" : "/logos/logo-icon-light.png";
