@@ -294,17 +294,21 @@ const MessageBubble = memo(
     onForward,
     onDelete,
     onExpandImage,
+    isHighlighted,
+    onScrollToMessage,
   }: {
     message: MessageRecord;
     chat: ChatRecord;
     messagesByRemoteId: Map<string, MessageRecord>;
     selected: boolean;
+    isHighlighted?: boolean;
     isSelectionMode: boolean;
     onToggleSelection: (m: MessageRecord) => void;
     onReply: (m: MessageRecord) => void;
     onForward: (m: MessageRecord) => void;
     onDelete: (m: MessageRecord) => void;
     onExpandImage: (url: string, alt: string) => void;
+    onScrollToMessage?: (id: string) => void;
   }) {
     const fromMe = !!message.from_me;
     const mediaUrl = getMediaUrl(message);
@@ -322,7 +326,7 @@ const MessageBubble = memo(
     const quotedKind = quotedOriginal ? getMediaKind(quotedOriginal) : null;
 
     return (
-      <div className={cn("mb-2 flex items-center gap-2", fromMe ? "justify-end" : "justify-start")}>
+      <div id={`message-${message.id}`} className={cn("mb-2 flex items-center gap-2", fromMe ? "justify-end" : "justify-start")}>
         {isSelectionMode && !deleted && (
           <button
             type="button"
@@ -337,10 +341,13 @@ const MessageBubble = memo(
           </button>
         )}
         <div
+          id={`message-bubble-${message.id}`}
           className={cn(
-            "group relative min-w-[168px] max-w-[72%] rounded-lg px-3 py-2 shadow-sm transition-colors sm:min-w-[196px]",
+            "group relative min-w-[168px] max-w-[72%] rounded-lg px-3 py-2 shadow-sm sm:min-w-[196px] transition-all",
             fromMe ? "rounded-tr-none bg-(--chat-me)" : "rounded-tl-none bg-(--chat-other)",
             selected && "ring-2 ring-teal-500/70",
+            isHighlighted && "ring-2 ring-teal-500/30 bg-teal-500/20 duration-300",
+            !isHighlighted && "duration-1000",
             deleted && "border border-dashed border-red-500/45 bg-(--chat-muted)/80 opacity-80 shadow-none saturate-[0.65]",
           )}
         >
@@ -380,9 +387,13 @@ const MessageBubble = memo(
           <div className={cn(deleted && "rounded-md bg-(--chat-background)/20 p-2 opacity-70")}>
             {quotedMessage && (
               <div
+                onClick={() => {
+                  if (!quotedOriginal || !onScrollToMessage) return;
+                  onScrollToMessage(quotedOriginal.id);
+                }}
                 className={cn(
-                  "mb-2 overflow-hidden rounded-md border-l-4 px-2.5 py-2 shadow-[inset_0_0_0_1px_rgba(17,27,33,0.035)]",
-                  fromMe ? "bg-[#c8f4c2] dark:bg-[#0f3f2d]" : "bg-[#f5f6f6] dark:bg-[#1d292f]",
+                  "mb-2 overflow-hidden rounded-md border-l-4 px-2.5 py-2 shadow-[inset_0_0_0_1px_rgba(17,27,33,0.035)] cursor-pointer hover:opacity-90 transition-opacity",
+                  fromMe ? "bg-[#c8f4c2] dark:bg-[#0f3f2d]" : "bg-[#f5f6f6] dark:bg-[#1d1e1e]",
                   quotedMessage.fromMe ? "border-l-[#00a884]" : "border-l-[#53bdeb]",
                 )}
               >
@@ -461,7 +472,7 @@ const MessageBubble = memo(
     );
   },
   (prevProps: any, nextProps: any) => {
-    return prevProps.message === nextProps.message && prevProps.selected === nextProps.selected && prevProps.isSelectionMode === nextProps.isSelectionMode && prevProps.chat === nextProps.chat;
+    return prevProps.message === nextProps.message && prevProps.selected === nextProps.selected && prevProps.isSelectionMode === nextProps.isSelectionMode && prevProps.chat === nextProps.chat && prevProps.isHighlighted === nextProps.isHighlighted;
   },
 );
 
@@ -503,6 +514,7 @@ export function ChatWindow({
   const [hasMoreForwardTargets, setHasMoreForwardTargets] = useState(false);
   const [isForwarding, setIsForwarding] = useState(false);
   const [messageActionError, setMessageActionError] = useState<string | null>(null);
+  const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [isRecordingPaused, setIsRecordingPaused] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
@@ -1121,11 +1133,18 @@ export function ChatWindow({
                         messagesByRemoteId={messagesByRemoteId}
                         selected={selectedMessageIds.has(message.id)}
                         isSelectionMode={isSelectionMode}
+                        isHighlighted={highlightedMessageId === message.id}
                         onToggleSelection={toggleMessageSelection}
                         onReply={beginReply}
                         onForward={beginForward}
                         onDelete={beginDelete}
                         onExpandImage={(url: string, alt: string) => setExpandedImage({ url, alt })}
+                        onScrollToMessage={(id) => {
+                          const el = document.getElementById(`message-${id}`);
+                          if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+                          setHighlightedMessageId(id);
+                          setTimeout(() => setHighlightedMessageId(null), 1000);
+                        }}
                       />
                     ))}
                   </div>
